@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         bid = load_bid(args.path)
         blocks, skipped = to_content_blocks(bid.attachments)
         print(f"Analysing '{bid.subject}' ({len(blocks)} documents) with {args.model}...", file=sys.stderr)
-        assessment = analyze(bid, blocks, model=args.model, effort=args.effort)
+        assessment = analyze(bid, blocks, skipped, model=args.model, effort=args.effort)
     except (ValueError, PayloadTooLarge, AnalysisError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

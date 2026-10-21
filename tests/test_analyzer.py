@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from bidtriage.analyzer import AnalysisError, analyze, build_request
+from bidtriage.attachments import Skipped
 from bidtriage.models import Bid
-from bidtriage.schema import BidAssessment
 from tests.fixtures import sample_assessment
 
 TODAY = date(2026, 10, 21)
@@ -18,6 +18,11 @@ bid = Bid(
 )
 blocks = [{"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "AA=="},
            "title": "rfq.pdf"}]
+VALID_JSON = sample_assessment().model_dump_json()
+
+
+def text(t):
+    return SimpleNamespace(type="text", text=t)
 
 
 class FakeStream:
@@ -35,11 +40,10 @@ class FakeStream:
 
 
 class FakeClient:
-    def __init__(self, stop_reason, parsed):
+    def __init__(self, stop_reason, content):
         self.last_kwargs = None
-        message = SimpleNamespace(stop_reason=stop_reason, parsed_output=parsed)
+        self._message = SimpleNamespace(stop_reason=stop_reason, content=content)
         self.messages = SimpleNamespace(stream=self._stream)
-        self._message = message
 
     def _stream(self, **kwargs):
         self.last_kwargs = kwargs
@@ -47,11 +51,14 @@ class FakeClient:
 
 
 def test_build_request_shape():
-    req = build_request(bid, blocks, model="claude-opus-5-5", effort="high", today=TODAY,
+    req = build_request(bid, blocks, [], model="claude-opus-5-5", effort="high", today=TODAY,
                         system_prompt="SYS", profile="PROFILE")
     assert req["model"] == "claude-opus-5-5"
     assert req["max_tokens"] == 64000
-    assert req["output_config"] == {"effort": "high"}
+    assert req["output_config"]["effort"] == "high"
+    assert req["output_config"]["format"]["type"] == "json_schema"
+    assert "rfq_number" in req["output_config"]["format"]["schema"]["properties"]
+    assert "output_format" not in req
     assert "thinking" not in req
     assert req["extra_headers"] == {"anthropic-beta": "server-side-fallback-2026-07-01"}
     assert req["extra_body"] == {"fallbacks": "default"}
@@ -64,15 +71,32 @@ def test_build_request_shape():
 
 
 def test_build_request_includes_today():
-    req = build_request(bid, [], model="m", effort="high", today=TODAY, system_prompt="", profile="")
+    req = build_request(bid, [], [], model="m", effort="high", today=TODAY, system_prompt="", profile="")
     assert "2026-10-21" in req["messages"][0]["content"][-1]["text"]
 
 
-def test_analyze_returns_parsed_output():
-    client = FakeClient(stop_reason="end_turn", parsed=sample_assessment())
-    result = analyze(bid, [], client=client, today=TODAY)
-    assert result.rfq_number == sample_assessment().rfq_number
-    assert client.last_kwargs["output_format"] is BidAssessment
+def test_build_request_names_unreadable_attachments():
+    req = build_request(bid, [], [Skipped("Annexure-7.docx", "unsupported file type .docx")],
+                        model="m", effort="high", today=TODAY, system_prompt="", profile="")
+    msg = req["messages"][0]["content"][-1]["text"]
+    assert "Attached but not readable by this tool: Annexure-7.docx" in msg
+    assert "do not report these as missing" in msg
+
+
+def test_analyze_returns_validated_assessment():
+    client = FakeClient("end_turn", [text(VALID_JSON)])
+    assert analyze(bid, [], client=client, today=TODAY).rfq_number == sample_assessment().rfq_number
+
+
+def test_analyze_uses_text_after_last_fallback_block():
+    content = [text('{"customer": "Hindustan Aer'), SimpleNamespace(type="fallback"), text(VALID_JSON)]
+    result = analyze(bid, [], client=FakeClient("end_turn", content), today=TODAY)
+    assert result.customer == sample_assessment().customer
+
+
+def test_analyze_invalid_json_raises_analysis_error():
+    with pytest.raises(AnalysisError, match="not a valid assessment"):
+        analyze(bid, [], client=FakeClient("end_turn", [text('{"customer": "HAL"')]), today=TODAY)
 
 
 def test_analyze_missing_credentials_gives_setup_hint():
@@ -89,5 +113,6 @@ def test_analyze_missing_credentials_gives_setup_hint():
 
 @pytest.mark.parametrize("reason", ["refusal", "max_tokens"])
 def test_analyze_raises_on_bad_stop_reason(reason):
+    # Partial JSON, as a truncated or refused stream would leave it.
     with pytest.raises(AnalysisError, match=reason):
-        analyze(bid, [], client=FakeClient(stop_reason=reason, parsed=None), today=TODAY)
+        analyze(bid, [], client=FakeClient(reason, [text('{"customer": "Hind')]), today=TODAY)
