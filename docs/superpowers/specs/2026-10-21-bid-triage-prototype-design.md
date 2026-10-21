@@ -55,7 +55,7 @@ over request limits); local text extraction (loses table structure).
 | `bidtriage/schema.py` | `BidAssessment` Pydantic model | `pydantic` |
 | `bidtriage/render.py` | `BidAssessment` + skipped files → Markdown and HTML card | stdlib |
 | `prompts/system.md` | Analysis instructions | — |
-| `prompts/capability_profile.md` | Rug-Rel strengths, limits, hard no's — draft for Mahadevan to complete | — |
+| `prompts/capability_profile.md` | Rug-Rel SBU-2 product lines, input/output/cooling ranges, standards, past work, accepted terms, and the SBU-2 MIR question checklist. Seeded from the SBU-2 BD deck and the ATRU compliance submission; `[CONFIRM]` items await Mahadevan | — |
 
 ## BidAssessment schema (fields)
 
@@ -71,7 +71,9 @@ over request limits); local text extraction (loses table structure).
 - `timeline` — list of {milestone, when, source}
 - `fit_verdict` — strong / possible / poor / unclear
 - `fit_reasons` — list of strings referencing the capability profile
-- `questions_for_reviewer` — list of strings
+- `questions_for_reviewer` — list of strings; for missing information, phrased
+  along the SBU-2 MIR checklist (input, rails, power, cooling, form factor,
+  application, temperature, project status, quantities, budget, competitors)
 - `documents_read` — list of filenames the model actually used
 
 ## Data flow
@@ -94,6 +96,13 @@ input path → email_loader → Bid → attachments → content blocks
 - Unit: email loading from a synthetic `.eml` with PDF + xlsx attachments; folder mode;
   attachment conversion; rendering from a fixture `BidAssessment`.
 - Live (manual, costs money): AHRU RFQ folder, checked against success criterion 1.
+
+## Future phase (not in this prototype)
+
+Draft the technical compliance document for approved bids. Mahadevan's existing
+format (see the ATRU submission) is a clause-by-clause table: every RFQ clause with
+a "Rug-Rel Compliance" column ("OK Complied", or a remark/deviation highlighted in
+red). The `assessment.json` from this prototype is the starting point for that.
 
 ## Configuration
 
