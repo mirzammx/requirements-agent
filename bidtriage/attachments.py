@@ -9,6 +9,8 @@ from bidtriage.models import Attachment
 
 # The API rejects requests over 32 MB; leave headroom for the prompt text.
 MAX_PAYLOAD_BYTES = 30 * 1024 * 1024
+# The API's PDF page limit for one request.
+MAX_PDF_PAGES = 600
 
 SPREADSHEET_EXTS = {".xlsx", ".xlsm"}
 TEXT_EXTS = {".csv", ".txt"}
@@ -27,9 +29,16 @@ class PayloadTooLarge(Exception):
 def to_content_blocks(attachments: list[Attachment]) -> tuple[list[dict], list[Skipped]]:
     blocks: list[dict] = []
     skipped: list[Skipped] = []
+    pdf_pages = 0
     for att in attachments:
         ext = PurePath(att.filename).suffix.lower()
         if ext == ".pdf":
+            # One unreadable PDF would make the API reject the whole request, so check first.
+            problem, pages = _check_pdf(att.data)
+            if problem:
+                skipped.append(Skipped(att.filename, problem))
+                continue
+            pdf_pages += pages
             blocks.append(_pdf_block(att))
         elif ext in SPREADSHEET_EXTS:
             try:
@@ -41,8 +50,25 @@ def to_content_blocks(attachments: list[Attachment]) -> tuple[list[dict], list[S
             blocks.append({"type": "text", "text": f"=== {att.filename} ===\n{text}"})
         else:
             skipped.append(Skipped(att.filename, f"unsupported file type {ext or '(none)'}"))
+    if pdf_pages > MAX_PDF_PAGES:
+        raise PayloadTooLarge(
+            f"attached PDFs have {pdf_pages} pages in total, over the {MAX_PDF_PAGES}-page limit for one request"
+        )
     _check_payload_size(attachments, blocks)
     return blocks, skipped
+
+
+def _check_pdf(data: bytes) -> tuple[str | None, int]:
+    """Return (reason the PDF can't be sent, or None; page count)."""
+    from pypdf import PdfReader
+
+    try:
+        reader = PdfReader(BytesIO(data))
+        if reader.is_encrypted:
+            return "password-protected PDF", 0
+        return None, len(reader.pages)
+    except Exception as exc:
+        return f"could not read: {exc}", 0
 
 
 def _pdf_block(att: Attachment) -> dict:

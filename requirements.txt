@@ -2,4 +2,5 @@ anthropic
 pydantic>=2
 extract-msg
 openpyxl
+pypdf
 pytest
