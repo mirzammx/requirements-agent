@@ -13,6 +13,7 @@ from pathlib import Path
 from bidtriage.analyzer import DEFAULT_EFFORT, DEFAULT_MODEL, AnalysisError, analyze
 from bidtriage.attachments import PayloadTooLarge, to_content_blocks
 from bidtriage.email_loader import load_bid
+from bidtriage.gemini_analyzer import DEFAULT_GEMINI_MODEL, analyze_gemini
 from bidtriage.render import render_html, render_markdown
 from bidtriage.schema import BidAssessment
 
@@ -28,7 +29,8 @@ def output_dir(base: Path, a: BidAssessment, subject: str, today: date) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Assess a bid email and its documents.")
     parser.add_argument("path", help="Outlook .msg, .eml, or a folder with email.txt and attachments")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--provider", default="claude", choices=["claude", "gemini"])
+    parser.add_argument("--model", help=f"default: {DEFAULT_MODEL} (claude) or {DEFAULT_GEMINI_MODEL} (gemini)")
     parser.add_argument("--effort", default=DEFAULT_EFFORT, choices=["low", "medium", "high", "xhigh", "max"])
     parser.add_argument("--out", default="out", help="Output base directory (default: out)")
     args = parser.parse_args(argv)
@@ -36,8 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         bid = load_bid(args.path)
         blocks, skipped = to_content_blocks(bid.attachments)
-        print(f"Analysing '{bid.subject}' ({len(blocks)} documents) with {args.model}...", file=sys.stderr)
-        assessment = analyze(bid, blocks, skipped, model=args.model, effort=args.effort)
+        gemini = args.provider == "gemini"
+        run = analyze_gemini if gemini else analyze
+        model = args.model or (DEFAULT_GEMINI_MODEL if gemini else DEFAULT_MODEL)
+        print(f"Analysing '{bid.subject}' ({len(blocks)} documents) with {model}...", file=sys.stderr)
+        assessment = run(bid, blocks, skipped, model=model, effort=args.effort)
     except (ValueError, PayloadTooLarge, AnalysisError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

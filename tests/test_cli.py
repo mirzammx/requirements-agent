@@ -38,3 +38,19 @@ def test_main_reports_analysis_error_and_writes_nothing(tmp_path, monkeypatch, c
     assert triage.main([str(bid_dir), "--out", str(out)]) == 1
     assert "error: Claude stopped with refusal" in capsys.readouterr().err
     assert not out.exists()
+
+
+def test_provider_gemini_uses_gemini_with_its_default_model(tmp_path, monkeypatch, bid_dir):
+    calls = {}
+
+    def fake_gemini(bid, blocks, skipped, **kwargs):
+        calls.update(kwargs)
+        return sample_assessment()
+
+    def claude_must_not_run(*a, **k):
+        raise AssertionError("Claude called")
+
+    monkeypatch.setattr(triage, "analyze_gemini", fake_gemini)
+    monkeypatch.setattr(triage, "analyze", claude_must_not_run)
+    assert triage.main([str(bid_dir), "--provider", "gemini", "--out", str(tmp_path / "out")]) == 0
+    assert calls["model"] == "gemini-3.8-flash"

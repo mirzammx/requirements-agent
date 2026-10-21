@@ -9,7 +9,9 @@ python -m venv .venv
 .venv/Scripts/pip install -r requirements.txt     # Windows; use .venv/bin/pip on Linux/macOS
 ```
 
-Credentials: set `ANTHROPIC_API_KEY`, or run `ant auth login` once.
+Credentials: set `ANTHROPIC_API_KEY` (or run `ant auth login`) for Claude, or `GEMINI_API_KEY` for Gemini.
+
+**Gemini (proof-of-concept only):** add `--provider gemini` (default model `gemini-3.8-flash`). Free-tier keys from aistudio.google.com work, but Google may use free-tier requests to improve its products, so the production setup is Claude on paid billing.
 
 ## Usage
 
@@ -20,7 +22,7 @@ Credentials: set `ANTHROPIC_API_KEY`, or run `ant auth login` once.
 
 A folder input holds the attachments plus an optional `email.txt` (headers such as `Subject:` and `From:`, then a blank line, then the body).
 
-Options: `--model` (default `claude-opus-5-5`), `--effort` (`low` to `max`, default `high`), `--out` (default `out`).
+Options: `--provider` (`claude` or `gemini`, default `claude`), `--model` (default `claude-opus-5-5` / `gemini-3.8-flash`), `--effort` (`low` to `max`, default `high`), `--out` (default `out`).
 
 ## Output
 

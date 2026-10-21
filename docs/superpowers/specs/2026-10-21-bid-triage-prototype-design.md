@@ -109,3 +109,5 @@ red). The `assessment.json` from this prototype is the starting point for that.
 - `ANTHROPIC_API_KEY` from environment (or `ant auth login` profile).
 - Model and effort overridable via CLI flags, defaulting to `claude-opus-5-5` / `high`.
 - Provider is swappable later (e.g. `AnthropicFoundry` for Azure) inside `analyzer.py` only.
+- `--provider gemini` (`bidtriage/gemini_analyzer.py`, default `gemini-3.8-flash`, `GEMINI_API_KEY`) for
+  free-tier proof-of-concept testing; same prompts and schema. Production target remains Claude on paid billing.

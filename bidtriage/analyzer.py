@@ -31,8 +31,20 @@ class AnalysisError(Exception):
     pass
 
 
-def build_request(bid: Bid, blocks: list[dict], skipped: list[Skipped], *, model: str, effort: str,
-                  today: date, system_prompt: str, profile: str) -> dict:
+def load_prompts() -> tuple[str, str]:
+    """(system prompt, capability profile) from the prompts/ folder."""
+    return (
+        (PROMPTS_DIR / "system.md").read_text(encoding="utf-8"),
+        (PROMPTS_DIR / "capability_profile.md").read_text(encoding="utf-8"),
+    )
+
+
+def system_text(system_prompt: str, profile: str) -> str:
+    return f"{system_prompt}\n\n# Capability profile\n\n{profile}"
+
+
+def user_text(bid: Bid, blocks: list[dict], skipped: list[Skipped], today: date) -> str:
+    """The text that follows the documents: today's date, the email, and what is attached."""
     titles = [b["title"] for b in blocks if b.get("type") == "document"]
     titles += [b["text"].splitlines()[0].strip("= ") for b in blocks if b.get("type") == "text"]
     text = (
@@ -46,6 +58,12 @@ def build_request(bid: Bid, blocks: list[dict], skipped: list[Skipped], *, model
             f"\nAttached but not readable by this tool: {', '.join(s.filename for s in skipped)}"
             " (do not report these as missing; ask the reviewer to check them)"
         )
+    return text
+
+
+def build_request(bid: Bid, blocks: list[dict], skipped: list[Skipped], *, model: str, effort: str,
+                  today: date, system_prompt: str, profile: str) -> dict:
+    text = user_text(bid, blocks, skipped, today)
     return {
         "model": model,
         "max_tokens": MAX_TOKENS,
@@ -56,7 +74,7 @@ def build_request(bid: Bid, blocks: list[dict], skipped: list[Skipped], *, model
                 "schema": anthropic.transform_schema(BidAssessment.model_json_schema()),
             },
         },
-        "system": f"{system_prompt}\n\n# Capability profile\n\n{profile}",
+        "system": system_text(system_prompt, profile),
         "messages": [{"role": "user", "content": [*blocks, {"type": "text", "text": text}]}],
         # Server-side refusal fallback: a declined request is re-run on another model.
         "extra_headers": {"anthropic-beta": FALLBACK_BETA},
@@ -67,10 +85,10 @@ def build_request(bid: Bid, blocks: list[dict], skipped: list[Skipped], *, model
 def analyze(bid: Bid, blocks: list[dict], skipped: list[Skipped] | None = None, *, client=None,
             model: str = DEFAULT_MODEL, effort: str = DEFAULT_EFFORT,
             today: date | None = None) -> BidAssessment:
+    system_prompt, profile = load_prompts()
     request = build_request(
         bid, blocks, skipped or [], model=model, effort=effort, today=today or date.today(),
-        system_prompt=(PROMPTS_DIR / "system.md").read_text(encoding="utf-8"),
-        profile=(PROMPTS_DIR / "capability_profile.md").read_text(encoding="utf-8"),
+        system_prompt=system_prompt, profile=profile,
     )
     client = client or anthropic.Anthropic()
     try:
