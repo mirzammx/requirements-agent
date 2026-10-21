@@ -75,6 +75,18 @@ def test_analyze_returns_parsed_output():
     assert client.last_kwargs["output_format"] is BidAssessment
 
 
+def test_analyze_missing_credentials_gives_setup_hint():
+    class NoAuthClient:
+        def __init__(self):
+            self.messages = SimpleNamespace(stream=self._stream)
+
+        def _stream(self, **kwargs):
+            raise TypeError('"Could not resolve authentication method. Expected one of api_key, auth_token"')
+
+    with pytest.raises(AnalysisError, match="ANTHROPIC_API_KEY"):
+        analyze(bid, [], client=NoAuthClient(), today=TODAY)
+
+
 @pytest.mark.parametrize("reason", ["refusal", "max_tokens"])
 def test_analyze_raises_on_bad_stop_reason(reason):
     with pytest.raises(AnalysisError, match=reason):

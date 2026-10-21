@@ -60,6 +60,12 @@ def analyze(bid: Bid, blocks: list[dict], *, client=None, model: str = DEFAULT_M
         raise AnalysisError(f"Claude API error {exc.status_code}: {exc.message}") from exc
     except anthropic.APIConnectionError as exc:
         raise AnalysisError(f"could not reach the Claude API: {exc}") from exc
+    except TypeError as exc:
+        if "authentication" not in str(exc):
+            raise
+        raise AnalysisError(
+            "no Claude API credentials found: set ANTHROPIC_API_KEY or run `ant auth login`"
+        ) from exc
     if message.stop_reason in ("refusal", "max_tokens"):
         raise AnalysisError(f"Claude stopped with {message.stop_reason}; no card written")
     if message.parsed_output is None:
