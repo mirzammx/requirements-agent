@@ -6,6 +6,8 @@ class Attachment:
     filename: str
     data: bytes
     content_type: str
+    # Set when the loader could not extract the file; it is then listed as not read.
+    unreadable_reason: str = ""
 
 
 @dataclass

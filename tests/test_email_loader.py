@@ -55,3 +55,50 @@ def test_unknown_path_type_raises(tmp_path):
     p.write_bytes(b"x")
     with pytest.raises(ValueError):
         load_bid(p)
+
+
+class _FakeAtt:
+    def __init__(self, name, data=None, att_type=None, data_error=None):
+        self.longFilename = name
+        self.shortFilename = None
+        self.type = att_type
+        self._data, self._error = data, data_error
+
+    @property
+    def data(self):
+        if self._error:
+            raise self._error
+        return self._data
+
+
+def test_msg_cloud_embedded_and_broken_attachments_do_not_crash(tmp_path, monkeypatch):
+    import extract_msg
+    from extract_msg.enums import AttachmentType
+
+    from bidtriage.attachments import to_content_blocks
+
+    atts = [
+        _FakeAtt("rfq.csv", b"a,b", AttachmentType.DATA),
+        _FakeAtt("Tender pack", att_type=AttachmentType.WEB, data_error=NotImplementedError("web")),
+        _FakeAtt("Fwd RFQ.msg", data=object(), att_type=AttachmentType.MSG),
+        _FakeAtt("odd.bin", data=None, att_type=AttachmentType.UNSUPPORTED),
+    ]
+
+    class FakeMsg:
+        def __init__(self, path, **kwargs):
+            self.subject, self.sender, self.date, self.body = "S", "F", "D", "B"
+            self.attachments = atts
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(extract_msg, "Message", FakeMsg)
+    bid = load_bid(tmp_path / "bid.msg")
+
+    assert [a.filename for a in bid.attachments] == ["rfq.csv", "Tender pack", "Fwd RFQ.msg", "odd.bin"]
+    blocks, skipped = to_content_blocks(bid.attachments)
+    assert len(blocks) == 1
+    reasons = {s.filename: s.reason for s in skipped}
+    assert "cloud" in reasons["Tender pack"]
+    assert "forwarded email" in reasons["Fwd RFQ.msg"]
+    assert "could not extract" in reasons["odd.bin"]

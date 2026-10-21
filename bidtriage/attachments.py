@@ -32,7 +32,9 @@ def to_content_blocks(attachments: list[Attachment]) -> tuple[list[dict], list[S
     pdf_pages = 0
     for att in attachments:
         ext = PurePath(att.filename).suffix.lower()
-        if ext == ".pdf":
+        if att.unreadable_reason:
+            skipped.append(Skipped(att.filename, att.unreadable_reason))
+        elif ext == ".pdf":
             # One unreadable PDF would make the API reject the whole request, so check first.
             problem, pages = _check_pdf(att.data)
             if problem:

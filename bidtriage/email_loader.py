@@ -45,17 +45,12 @@ def _load_eml(path: Path) -> Bid:
 
 def _load_msg(path: Path) -> Bid:
     import extract_msg
+    from extract_msg.enums import AttachmentType, ErrorBehavior
 
-    msg = extract_msg.Message(str(path))
+    # Tolerate attachment kinds extract_msg can't handle; they are listed as not read.
+    msg = extract_msg.Message(str(path), errorBehavior=ErrorBehavior.ATTACH_SUPPRESS_ALL)
     try:
-        attachments = []
-        for att in msg.attachments:
-            name = att.longFilename or att.shortFilename or "unnamed"
-            if isinstance(att.data, bytes):
-                attachments.append(Attachment(name, att.data, mimetypes.guess_type(name)[0] or ""))
-            else:
-                # An email embedded as an attachment: recorded so it shows as unread.
-                attachments.append(Attachment(f"{name}.msg", b"", "message/rfc822"))
+        attachments = [_msg_attachment(att, AttachmentType) for att in msg.attachments]
         return Bid(
             subject=msg.subject or "",
             sender=msg.sender or "",
@@ -66,6 +61,21 @@ def _load_msg(path: Path) -> Bid:
         )
     finally:
         msg.close()
+
+
+def _msg_attachment(att, AttachmentType) -> Attachment:
+    name = att.longFilename or att.shortFilename or "unnamed"
+    if att.type == AttachmentType.WEB:
+        return Attachment(name, b"", "", "cloud/linked attachment (OneDrive/SharePoint link), not downloaded")
+    if att.type in (AttachmentType.MSG, AttachmentType.SIGNED_EMBEDDED):
+        return Attachment(name, b"", "message/rfc822", "forwarded email inside the message, not read")
+    try:
+        data = att.data
+    except Exception as exc:
+        return Attachment(name, b"", "", f"could not extract attachment: {exc}")
+    if not isinstance(data, bytes):
+        return Attachment(name, b"", "", "could not extract attachment from the email")
+    return Attachment(name, data, mimetypes.guess_type(name)[0] or "")
 
 
 def _load_folder(path: Path) -> Bid:
