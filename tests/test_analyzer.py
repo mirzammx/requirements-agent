@@ -3,7 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from bidtriage.analyzer import AnalysisError, analyze, build_request
+from pydantic import BaseModel
+
+from bidtriage.analyzer import AnalysisError, analyze, build_request, call_claude
 from bidtriage.attachments import Skipped
 from bidtriage.models import Bid
 from tests.fixtures import sample_assessment
@@ -116,3 +118,16 @@ def test_analyze_raises_on_bad_stop_reason(reason):
     # Partial JSON, as a truncated or refused stream would leave it.
     with pytest.raises(AnalysisError, match=reason):
         analyze(bid, [], client=FakeClient(reason, [text('{"customer": "Hind')]), today=TODAY)
+
+
+class Tiny(BaseModel):
+    x: str
+
+
+def test_call_claude_validates_against_given_schema():
+    client = FakeClient("end_turn", [text('{"x": "hi"}')])
+    result = call_claude("SYS", [], "hello", Tiny, client=client, model="m", effort="low")
+    assert result == Tiny(x="hi")
+    assert client.last_kwargs["system"] == "SYS"
+    assert "x" in client.last_kwargs["output_config"]["format"]["schema"]["properties"]
+    assert client.last_kwargs["messages"][0]["content"][-1]["text"] == "hello"

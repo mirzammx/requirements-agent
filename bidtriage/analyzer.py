@@ -12,9 +12,10 @@ answer (which follows a `fallback` block) can be read.
 
 from datetime import date
 from pathlib import Path
+from typing import TypeVar
 
 import anthropic
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from bidtriage.attachments import Skipped
 from bidtriage.models import Bid
@@ -25,6 +26,7 @@ DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_EFFORT = "high"
 MAX_TOKENS = 64000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+M = TypeVar("M", bound=BaseModel)
 
 
 class AnalysisError(Exception):
@@ -61,20 +63,16 @@ def user_text(bid: Bid, blocks: list[dict], skipped: list[Skipped], today: date)
     return text
 
 
-def build_request(bid: Bid, blocks: list[dict], skipped: list[Skipped], *, model: str, effort: str,
-                  today: date, system_prompt: str, profile: str) -> dict:
-    text = user_text(bid, blocks, skipped, today)
+def claude_request(system: str, blocks: list[dict], text: str, schema: type[BaseModel], *,
+                   model: str, effort: str) -> dict:
     return {
         "model": model,
         "max_tokens": MAX_TOKENS,
         "output_config": {
             "effort": effort,
-            "format": {
-                "type": "json_schema",
-                "schema": anthropic.transform_schema(BidAssessment.model_json_schema()),
-            },
+            "format": {"type": "json_schema", "schema": anthropic.transform_schema(schema.model_json_schema())},
         },
-        "system": system_text(system_prompt, profile),
+        "system": system,
         "messages": [{"role": "user", "content": [*blocks, {"type": "text", "text": text}]}],
         # Server-side refusal fallback: a declined request is re-run on another model.
         "extra_headers": {"anthropic-beta": FALLBACK_BETA},
@@ -82,14 +80,25 @@ def build_request(bid: Bid, blocks: list[dict], skipped: list[Skipped], *, model
     }
 
 
+def build_request(bid: Bid, blocks: list[dict], skipped: list[Skipped], *, model: str, effort: str,
+                  today: date, system_prompt: str, profile: str) -> dict:
+    return claude_request(system_text(system_prompt, profile), blocks, user_text(bid, blocks, skipped, today),
+                          BidAssessment, model=model, effort=effort)
+
+
 def analyze(bid: Bid, blocks: list[dict], skipped: list[Skipped] | None = None, *, client=None,
             model: str = DEFAULT_MODEL, effort: str = DEFAULT_EFFORT,
             today: date | None = None) -> BidAssessment:
     system_prompt, profile = load_prompts()
-    request = build_request(
-        bid, blocks, skipped or [], model=model, effort=effort, today=today or date.today(),
-        system_prompt=system_prompt, profile=profile,
-    )
+    return call_claude(system_text(system_prompt, profile), blocks,
+                       user_text(bid, blocks, skipped or [], today or date.today()), BidAssessment,
+                       client=client, model=model, effort=effort)
+
+
+def call_claude(system: str, blocks: list[dict], text: str, schema: type[M], *, client=None,
+                model: str = DEFAULT_MODEL, effort: str = DEFAULT_EFFORT, label: str = "assessment") -> M:
+    """One structured Claude call; returns `schema` validated, or raises AnalysisError."""
+    request = claude_request(system, blocks, text, schema, model=model, effort=effort)
     client = client or anthropic.Anthropic()
     try:
         with client.messages.stream(**request) as stream:
@@ -105,11 +114,11 @@ def analyze(bid: Bid, blocks: list[dict], skipped: list[Skipped] | None = None, 
             "no Claude API credentials found: set ANTHROPIC_API_KEY or run `ant auth login`"
         ) from exc
     if message.stop_reason in ("refusal", "max_tokens"):
-        raise AnalysisError(f"Claude stopped with {message.stop_reason}; no card written")
+        raise AnalysisError(f"Claude stopped with {message.stop_reason}; nothing written")
     try:
-        return BidAssessment.model_validate_json(_final_text(message.content))
+        return schema.model_validate_json(_final_text(message.content))
     except ValidationError as exc:
-        raise AnalysisError(f"Claude's reply was not a valid assessment; no card written ({exc})") from exc
+        raise AnalysisError(f"Claude's reply was not a valid {label}; nothing written ({exc})") from exc
 
 
 def _final_text(content: list) -> str:

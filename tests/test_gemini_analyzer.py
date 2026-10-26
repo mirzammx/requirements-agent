@@ -3,11 +3,12 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+from pydantic import BaseModel
 
 from bidtriage import gemini_analyzer
 from bidtriage.analyzer import AnalysisError
 from bidtriage.attachments import Skipped
-from bidtriage.gemini_analyzer import analyze_gemini, build_gemini_request
+from bidtriage.gemini_analyzer import analyze_gemini, build_gemini_request, call_gemini
 from bidtriage.models import Bid
 from tests.fixtures import sample_assessment
 
@@ -88,3 +89,17 @@ def test_analyze_gemini_rejects_oversized_inline_request(monkeypatch):
     monkeypatch.setattr(gemini_analyzer, "MAX_INLINE_BYTES", 5)
     with pytest.raises(AnalysisError, match="too large"):
         analyze_gemini(bid, blocks, client=FakeGemini(response("{}")), today=TODAY)
+
+
+class Tiny(BaseModel):
+    x: str
+
+
+def test_call_gemini_validates_against_given_schema():
+    client = FakeGemini(response('{"x": "hi"}'))
+    result = call_gemini("SYS", [], "hello", Tiny, client=client, model="m", effort="low")
+    assert result == Tiny(x="hi")
+    cfg = client.last_kwargs["config"]
+    assert cfg.system_instruction == "SYS"
+    assert "x" in cfg.response_json_schema["properties"]
+    assert cfg.thinking_config.thinking_level.name == "LOW"
