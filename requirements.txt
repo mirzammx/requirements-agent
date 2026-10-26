@@ -1,7 +1,8 @@
-anthropic
+﻿anthropic
 google-genai
 pydantic>=2
 extract-msg
 openpyxl
 pypdf
+python-docx
 pytest
