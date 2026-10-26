@@ -1,0 +1,35 @@
+# Rug-Rel company facts used to fill response documents.
+# An empty value ("") means UNKNOWN: drafts show a highlighted [[placeholder]] instead,
+# and no compliance or certification is claimed for it. Fill these in once and every
+# future draft picks them up.
+
+company_name = "Rug-Rel Components & Systems Pvt Ltd"
+address = "No. 313, Service Road, 7th Block, Nagarbhavi 2nd Stage, Bengaluru, Karnataka 560072"
+phone = "080 29558280"
+email = "Sales@rugrel.com"
+website = "http://rugrel.com"
+
+# Registration and tax
+gstin = ""
+pan = ""
+udyam_number = ""          # MSE / Udyam registration number
+msme_category = ""         # Micro / Small / Medium
+social_category = ""       # General / SC / ST
+women_owned = ""           # Yes / No
+
+# Signing authority
+authorised_signatory = ""
+signatory_designation = ""
+
+# Make in India
+local_content_percent = "" # e.g. "65"
+value_addition_location = "No. 313, Service Road, 7th Block, Nagarbhavi 2nd Stage, Bengaluru 560072"
+
+# Quality and approvals (leave empty unless certified; the drafter never claims an empty one)
+iso_9001 = ""              # e.g. "ISO 9001:2015, cert no. ..., valid till ..."
+as9100 = ""
+cemilac_approvals = ""     # approvals actually held, not processes followed
+buyer_vendor_codes = ""    # e.g. "HAL Avionics Hyderabad vendor code ..., BEL ..."
+
+# Payments
+bank_details = ""          # bank, branch, account no., IFSC (for EFT mandate)
