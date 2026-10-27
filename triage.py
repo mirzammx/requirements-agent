@@ -36,28 +36,35 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        bid = load_bid(args.path)
-        blocks, skipped = to_content_blocks(bid.attachments)
-        gemini = args.provider == "gemini"
-        run = analyze_gemini if gemini else analyze
-        model = args.model or (DEFAULT_GEMINI_MODEL if gemini else DEFAULT_MODEL)
-        print(f"Analysing '{bid.subject}' ({len(blocks)} documents) with {model}...", file=sys.stderr)
-        assessment = run(bid, blocks, skipped, model=model, effort=args.effort)
-    except (ValueError, PayloadTooLarge, AnalysisError) as exc:
+        out = run_triage(args.path, provider=args.provider, model=args.model, effort=args.effort,
+                         out_base=Path(args.out))
+    except (OSError, ValueError, PayloadTooLarge, AnalysisError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    for name in ("card.md", "card.html", "assessment.json"):
+        print(out / name)
+    return 0
 
-    today = date.today()
-    out = output_dir(Path(args.out), assessment, bid.subject, today)
+
+def run_triage(path, *, provider: str = "claude", model: str | None = None, effort: str = DEFAULT_EFFORT,
+               out_base: Path = Path("out"), out_dir: Path | None = None) -> Path:
+    """Assess one bid and write card.md, card.html and assessment.json; returns the card folder."""
+    bid = load_bid(path)
+    blocks, skipped = to_content_blocks(bid.attachments)
+    gemini = provider == "gemini"
+    run = analyze_gemini if gemini else analyze
+    model = model or (DEFAULT_GEMINI_MODEL if gemini else DEFAULT_MODEL)
+    print(f"Analysing '{bid.subject}' ({len(blocks)} documents) with {model}...", file=sys.stderr)
+    assessment = run(bid, blocks, skipped, model=model, effort=effort)
+
+    out = out_dir or output_dir(out_base, assessment, bid.subject, date.today())
     out.mkdir(parents=True, exist_ok=True)
     (out / "card.md").write_text(render_markdown(assessment, skipped, bid.subject), encoding="utf-8")
     (out / "card.html").write_text(render_html(assessment, skipped, bid.subject), encoding="utf-8")
     data = assessment.model_dump(mode="json")
     data["skipped_files"] = [{"filename": s.filename, "reason": s.reason} for s in skipped]
     (out / "assessment.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    for name in ("card.md", "card.html", "assessment.json"):
-        print(out / name)
-    return 0
+    return out
 
 
 if __name__ == "__main__":

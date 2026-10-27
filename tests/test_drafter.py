@@ -60,7 +60,7 @@ def test_cli_writes_response_files(monkeypatch, bid_and_card):
     assert draft_cli.main([str(bid), "--card", str(card)]) == 0
     names = sorted(p.name for p in (card / "response").iterdir())
     assert names == ["Checklist.md", "Compliance_Statement.docx", "Declarations.docx", "PreBid_Queries.docx",
-                     "Price_Bid.xlsx", "Technical_Compliance.docx", "draft.json"]
+                     "Price_Bid.xlsx", "Technical_Compliance.docx", "draft.json", "summary.json"]
 
 
 def test_cli_missing_card_errors(tmp_path, capsys, bid_and_card):
