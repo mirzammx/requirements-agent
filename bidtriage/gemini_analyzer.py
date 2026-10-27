@@ -69,10 +69,12 @@ def call_gemini(system: str, blocks: list[dict], text: str, schema: type[M], *, 
                             f"(limit {MAX_INLINE_BYTES / 1_048_576:.0f} MB)")
     request = gemini_request(system, blocks, text, schema, model=model, effort=effort)
     from google import genai
-    from google.genai import errors
+    from google.genai import errors, types
 
     try:
-        client = client or genai.Client()
+        # The free tier often answers 503 "high demand"; back off and retry rather than fail at once.
+        client = client or genai.Client(http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(
+            attempts=5, initial_delay=10, max_delay=120, http_status_codes=[429, 500, 503, 504])))
         response = client.models.generate_content(**request)
     except errors.APIError as exc:
         raise AnalysisError(f"Gemini API error {exc.code}: {exc.message}") from exc

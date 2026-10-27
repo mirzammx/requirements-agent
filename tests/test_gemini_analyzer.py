@@ -103,3 +103,19 @@ def test_call_gemini_validates_against_given_schema():
     assert cfg.system_instruction == "SYS"
     assert "x" in cfg.response_json_schema["properties"]
     assert cfg.thinking_config.thinking_level.name == "LOW"
+
+def test_default_client_retries_overload_errors(monkeypatch):
+    from google import genai
+
+    captured = {}
+
+    class FakeClientCls:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.models = SimpleNamespace(generate_content=lambda **k: response('{"x": "hi"}'))
+
+    monkeypatch.setattr(genai, "Client", FakeClientCls)
+    call_gemini("SYS", [], "hello", Tiny, model="m", effort="low")
+    retry = captured["http_options"].retry_options
+    assert retry.attempts >= 4
+    assert 503 in retry.http_status_codes and 429 in retry.http_status_codes
