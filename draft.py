@@ -36,8 +36,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--card", required=True, help="The triage output folder containing assessment.json")
     parser.add_argument("--provider", default="claude", choices=["claude", "gemini"])
     parser.add_argument("--model")
-    parser.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
+    parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"],
+                        help="default: high for Claude; low for Gemini, whose per-request time limit a full "
+                             "high-effort draft exceeds")
     args = parser.parse_args(argv)
+    effort = args.effort or ("low" if args.provider == "gemini" else "high")
 
     card = Path(args.card)
     try:
@@ -50,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Drafting response for '{bid.subject}' with {args.provider}...", file=sys.stderr)
         profile = load_profile()
         draft = draft_response(bid, blocks, skipped, assessment, provider=args.provider, model=args.model,
-                               effort=args.effort, profile=profile)
+                               effort=effort, profile=profile)
     except (ValueError, ValidationError, PayloadTooLarge, AnalysisError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

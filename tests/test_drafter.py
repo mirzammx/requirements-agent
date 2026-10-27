@@ -67,3 +67,13 @@ def test_cli_missing_card_errors(tmp_path, capsys, bid_and_card):
     bid, _ = bid_and_card
     assert draft_cli.main([str(bid), "--card", str(tmp_path / "nope")]) == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_cli_effort_defaults_low_for_gemini_high_for_claude(monkeypatch, bid_and_card):
+    bid, card = bid_and_card
+    seen = []
+    monkeypatch.setattr(draft_cli, "draft_response", lambda *a, **k: seen.append(k["effort"]) or sample_draft())
+    draft_cli.main([str(bid), "--card", str(card), "--provider", "gemini"])
+    draft_cli.main([str(bid), "--card", str(card)])
+    draft_cli.main([str(bid), "--card", str(card), "--provider", "gemini", "--effort", "high"])
+    assert seen == ["low", "high", "high"]

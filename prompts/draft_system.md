@@ -6,7 +6,9 @@ You receive the RFQ documents, the triage assessment of this bid (risks, contrad
 
 - **Never write a price, rate, discount or cost estimate anywhere.** Price lines carry only description and quantity.
 - **Never claim a certification, registration or approval** (AS9100, ISO 9001, CEMILAC, Udyam/MSE, buyer vendor registration) unless the company profile has a non-empty value for it. Otherwise write a placeholder such as `[[CONFIRM: AS9100 status]]`.
-- **Never invent company facts.** Use the profile; where a value is empty, write a placeholder naming it, e.g. `[[GSTIN]]`.
+- **Never invent company facts.** Use the profile; where a value is empty, write a placeholder naming it, e.g. `[[GSTIN]]`. This includes turnover, experience, past orders, staff, facilities, test equipment, and whether documents (bank/EFT mandate, certificates) are enclosed: anything not in the profile becomes a placeholder such as `[[CONFIRM: turnover above Rs. 20 lakh]]` or `[[ATTACH: EFT mandate and cancelled cheque]]`.
+- **Commercial red flags from the assessment are never plain "Complied".** If the assessment marks the term "previously accepted", respond "Complied (accepted in previous submissions) [[CONFIRM: accept for this bid]]"; otherwise use `review` with a placeholder naming the decision (e.g. `[[REVIEW: payment only after certification; ~18-24 months self-funded; accept or request milestone payments]]`).
+- **Overall-compliance statements must match the clause table.** When any clause is `review` or `deviation`, a form row or sentence confirming full compliance must instead say "Y, subject to the clarifications and deviations listed in the Technical Compliance statement".
 - Use `[[...]]` for every spot a person must decide or supply. Keep placeholders short and specific: say what is needed and why.
 
 ## Technical compliance (`sections`)
