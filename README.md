@@ -1,6 +1,8 @@
 # Bid triage and response drafting
 
-Two tools for the Rug-Rel SBU-2 bid process:
+Three tools for the Rug-Rel SBU-2 bid process:
+
+0. **`shortlist.py`** screens BidAssist alert exports and separates the few real power supply tenders from the keyword noise.
 
 1. **`triage.py`** turns one bid email and its documents (RFQ PDFs, compliance and price sheets) into a one-page assessment card, so Mahadevan can decide Go / No-go / Ask in minutes.
 2. **`draft.py`** turns an approved bid into editable response documents (technical compliance, buyer's compliance form, price sheet, declarations, pre-bid queries, checklist). Everything a person must decide or supply is a highlighted `[[placeholder]]`.
@@ -16,6 +18,21 @@ docker compose build
 Credentials: set `$env:ANTHROPIC_API_KEY = "..."` for Claude, or `$env:GEMINI_API_KEY = "..."` for Gemini, in the same PowerShell window. Compose passes them into the container.
 
 **Gemini (proof-of-concept only):** add `--provider gemini` (default model `gemini-3.8-flash`). Free-tier keys from aistudio.google.com work, but Google may use free-tier requests to improve its products, so the production setup is Claude on paid billing. The free tier often returns 503 "high demand"; retry, or try `--model gemini-3.6-flash`.
+
+## 0. Screen the BidAssist alerts
+
+Save the Excel files attached to the BidAssist alert emails (`<alert>-Tender List_<date>.xlsx`) and run:
+
+```powershell
+docker compose run --rm bid shortlist.py "samples/Power supply-Tender List_26092026.xlsx" "samples/My Preference-Tender List_26092026.xlsx" --provider gemini
+```
+
+Output in `out/shortlist_<date>/`:
+- `digest.html`: SBU-2 candidates first (soonest deadline first, with the reason), then rows to check by hand, tenders for other teams, and the not-relevant ones with reasons
+- `shortlist.xlsx`: every tender with its verdict, plus a **Decision** dropdown (Go / No-go / Ask) and Notes column for Mahadevan
+- `shortlist.json`: structured data
+
+No tender is ever dropped: anything the model doesn't classify is listed under "needs manual check".
 
 ## 1. Triage a bid
 
