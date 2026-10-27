@@ -58,3 +58,34 @@ def test_batch_text_lists_rows_and_profile():
     assert "GEM/1 | DRDO | Category: Ac Dc Power Supplies" in text
     assert "keyword: power supply" in text
     assert "14.02 Lac" in text
+
+
+def test_failed_batch_keeps_other_batches(monkeypatch):
+    from bidtriage.analyzer import AnalysisError
+
+    good = fake_provider([])
+    state = {"n": 0}
+
+    def flaky(system, blocks, text, schema, **kwargs):
+        state["n"] += 1
+        if state["n"] == 2:
+            raise AnalysisError("Gemini API error 429: quota")
+        return good(system, blocks, text, schema, **kwargs)
+
+    monkeypatch.setitem(shortlister.PROVIDERS, "claude", flaky)
+    out = {s.tender.tender_id: s for s in classify(tenders(4), provider="claude", today=TODAY, batch_size=2)}
+    assert out["T0"].category == "sbu2_power" and out["T1"].category == "sbu2_power"
+    assert out["T2"].category == "manual_check" and "Batch failed" in out["T2"].reason and "429" in out["T2"].reason
+
+
+def test_all_batches_failing_raises(monkeypatch):
+    import pytest
+
+    from bidtriage.analyzer import AnalysisError
+
+    def broken(*a, **k):
+        raise AnalysisError("no key")
+
+    monkeypatch.setitem(shortlister.PROVIDERS, "claude", broken)
+    with pytest.raises(AnalysisError, match="no key"):
+        classify(tenders(3), provider="claude", today=TODAY, batch_size=2)

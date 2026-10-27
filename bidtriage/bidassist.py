@@ -65,14 +65,35 @@ def _read_sheet(ws, source: str) -> list[Tender] | None:
     return None
 
 
+MERGE_FIELDS = ("tender_no", "authority", "amount", "opening_date", "closing_date", "emd", "location", "summary",
+                "description", "keyword")
+
+
+def _merge(kept: Tender, new: Tender) -> None:
+    """Combine two rows for one tender; a corrigendum's values (e.g. an extended deadline) win."""
+    if new.corrigendum or not kept.corrigendum:
+        for field in MERGE_FIELDS:
+            value = getattr(new, field)
+            if value and value != "-":
+                setattr(kept, field, value)
+    kept.corrigendum |= new.corrigendum
+
+
 def read_tender_lists(paths: list[Path]) -> list[Tender]:
     import openpyxl
 
+    import zipfile
+
+    from openpyxl.utils.exceptions import InvalidFileException
+
     by_id: dict[str, Tender] = {}
     for path in map(Path, paths):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # BidAssist files lack a default style
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # BidAssist files lack a default style
+                wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        except (InvalidFileException, zipfile.BadZipFile, KeyError) as exc:
+            raise ValueError(f"{path.name}: not a readable .xlsx ({exc}); save it from Excel as .xlsx") from exc
         try:
             found_header = False
             for ws in wb.worksheets:
@@ -82,7 +103,7 @@ def read_tender_lists(paths: list[Path]) -> list[Tender]:
                 found_header = True
                 for t in tenders:
                     if t.tender_id in by_id:
-                        by_id[t.tender_id].corrigendum |= t.corrigendum
+                        _merge(by_id[t.tender_id], t)
                     else:
                         by_id[t.tender_id] = t
         finally:

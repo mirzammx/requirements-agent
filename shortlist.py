@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from bidtriage.analyzer import AnalysisError
@@ -35,9 +35,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    # Never overwrite an earlier run: its tracker may already hold Mahadevan's decisions.
     out = Path(args.out) / f"shortlist_{today:%Y-%m-%d}"
+    if out.exists():
+        out = out.with_name(f"{out.name}_{datetime.now():%H%M%S}")
+        n = 2
+        while out.exists():
+            out = out.with_name(f"{out.name}_{n}")
+            n += 1
     try:
-        out.mkdir(parents=True, exist_ok=True)
+        out.mkdir(parents=True)
         (out / "digest.html").write_text(render_digest(items, today), encoding="utf-8")
         build_tracker(items).save(out / "shortlist.xlsx")
         data = [{**asdict(s.tender), "category": s.category, "route_to": s.route_to, "confidence": s.confidence,
@@ -47,6 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: could not write outputs ({exc}); close shortlist.xlsx if it is open and re-run",
               file=sys.stderr)
         return 1
+    failed = sum(s.reason.startswith("Batch failed") for s in items)
+    if failed:
+        print(f"warning: {failed} tenders were in a batch that failed; they are listed under 'needs manual check'. "
+              "Re-run later to classify them.", file=sys.stderr)
     counts = {c: sum(s.category == c for s in items)
               for c in ("sbu2_power", "manual_check", "other_product_line", "not_relevant")}
     print(f"{counts['sbu2_power']} for SBU-2, {counts['manual_check']} to check by hand, "

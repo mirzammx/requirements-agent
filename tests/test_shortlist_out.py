@@ -61,3 +61,12 @@ def test_cli_bad_file_errors(tmp_path, capsys):
     f = make_xlsx(tmp_path / "x.xlsx", {"S": [["nothing"]]})
     assert shortlist_cli.main([str(f), "--out", str(tmp_path / "out")]) == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_second_run_same_day_does_not_overwrite(tmp_path, monkeypatch):
+    f = make_xlsx(tmp_path / "Power supply-Tender List.xlsx", {"Tender List": [HEADER, row("G1", "SMPS")]})
+    monkeypatch.setattr(shortlist_cli, "classify", lambda tenders, **k: [item(t.tender_id, "sbu2_power", 3)
+                                                                         for t in tenders])
+    assert shortlist_cli.main([str(f), "--out", str(tmp_path / "out")]) == 0
+    assert shortlist_cli.main([str(f), "--out", str(tmp_path / "out")]) == 0
+    assert len(list((tmp_path / "out").iterdir())) == 2

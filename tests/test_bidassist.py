@@ -62,3 +62,19 @@ def test_dedupe_marks_corrigendum(tmp_path):
 def test_parse_date():
     assert parse_date("16-Oct-2026") == date(2026, 10, 16)
     assert parse_date("-") is None and parse_date("") is None and parse_date("soon") is None
+
+
+@pytest.mark.parametrize("order", ["plain_first", "corrigendum_first"])
+def test_corrigendum_fields_win_on_dedupe(tmp_path, order):
+    plain = make_xlsx(tmp_path / "a.xlsx", {"New": [HEADER, row("G1", "PSU", closing="16-Oct-2026")]})
+    corr = make_xlsx(tmp_path / "b.xlsx", {"Upd": [HEADER, row("G1", "PSU", closing="30-Oct-2026", corr="Y")]})
+    paths = [plain, corr] if order == "plain_first" else [corr, plain]
+    (t,) = read_tender_lists(paths)
+    assert t.closing_date == "30-Oct-2026" and t.corrigendum
+
+
+def test_non_xlsx_file_is_a_clear_error(tmp_path):
+    bad = tmp_path / "list.xlsx"
+    bad.write_bytes(b"not a zip at all")
+    with pytest.raises(ValueError, match="not a readable .xlsx"):
+        read_tender_lists([bad])
