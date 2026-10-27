@@ -8,6 +8,7 @@ Note: free-tier requests may be used by Google to improve its products.
 import base64
 from datetime import date
 
+import httpx
 from pydantic import BaseModel, ValidationError
 
 from bidtriage.analyzer import M, AnalysisError, load_prompts, system_text, user_text
@@ -78,6 +79,8 @@ def call_gemini(system: str, blocks: list[dict], text: str, schema: type[M], *, 
         response = client.models.generate_content(**request)
     except errors.APIError as exc:
         raise AnalysisError(f"Gemini API error {exc.code}: {exc.message}") from exc
+    except httpx.HTTPError as exc:
+        raise AnalysisError(f"could not reach the Gemini API ({exc}); try again shortly") from exc
     except ValueError as exc:
         if "API key" not in str(exc):
             raise

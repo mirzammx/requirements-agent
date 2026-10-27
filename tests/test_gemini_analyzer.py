@@ -119,3 +119,16 @@ def test_default_client_retries_overload_errors(monkeypatch):
     retry = captured["http_options"].retry_options
     assert retry.attempts >= 4
     assert 503 in retry.http_status_codes and 429 in retry.http_status_codes
+
+def test_network_failure_becomes_analysis_error():
+    import httpx
+
+    class Dropping:
+        def __init__(self):
+            self.models = SimpleNamespace(generate_content=self._gen)
+
+        def _gen(self, **kwargs):
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    with pytest.raises(AnalysisError, match="could not reach the Gemini API"):
+        call_gemini("SYS", [], "hello", Tiny, client=Dropping(), model="m", effort="low")
