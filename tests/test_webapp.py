@@ -66,7 +66,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(triage, "run_triage", fake_triage)
     monkeypatch.setattr(draft, "run_draft", fake_draft)
     monkeypatch.setattr(shortlist, "run_shortlist", fake_shortlist)
-    app = webapp.create_app(data_dir=tmp_path / "data", samples_dir=samples, sync_jobs=True)
+    app = webapp.create_app(data_dir=tmp_path / "data", samples_dir=samples, sync_jobs=True,
+                            allowed_hosts={"localhost"})
     return app.test_client(), tmp_path / "data"
 
 
@@ -213,3 +214,76 @@ def test_failed_triage_can_be_rerun(env, monkeypatch):
     assert client.post(url + "/triage", data={"provider": "gemini"}).status_code == 302
     html = client.get(url).get_data(as_text=True)
     assert "Generate response" in html and "could not reach" not in html
+
+def _eml_bytes():
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["Subject"] = "AHRU requirement"
+    msg.set_content("Check feasibility.")
+    return msg.as_bytes()
+
+
+def test_email_upload_with_typed_text_and_extra_pdf(env):
+    client, data = env
+    _new_bid(client, files=[(io.BytesIO(_eml_bytes()), "bid.eml"), (io.BytesIO(b"%PDF"), "extra.pdf")])
+    bid_dir = next((data / "bids").iterdir())
+    assert sorted(p.name for p in (bid_dir / "input").iterdir()) == ["bid.eml", "extra.pdf"]
+    assert json.loads((bid_dir / "meta.json").read_text())["input"] == "input"
+
+
+def test_two_email_files_rejected(env):
+    client, _ = env
+    resp = client.post("/bids", data={"provider": "gemini", "files": [(io.BytesIO(_eml_bytes()), "a.eml"),
+                                                                      (io.BytesIO(_eml_bytes()), "b.msg")]},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 400 and "one email file" in resp.get_data(as_text=True)
+
+
+def test_upload_names_keep_extension_and_do_not_collide(env):
+    client, data = env
+    _new_bid(client, files=[(io.BytesIO(b"%PDF"), "निविदा.pdf"), (io.BytesIO(b"%PDF"), "RFQ (1).pdf"),
+                            (io.BytesIO(b"%PDF"), "RFQ_1.pdf"), (io.BytesIO(b"x"), "email.txt")])
+    names = sorted(p.name for p in (next((data / "bids").iterdir()) / "input").iterdir())
+    assert names == ["RFQ_1.pdf", "RFQ_1_2.pdf", "email.txt", "email_2.txt", "upload.pdf"]
+
+
+def test_foreign_host_rejected(env):
+    client, _ = env
+    assert client.get("/", headers={"Host": "evil.example"}).status_code == 400
+
+
+def test_cross_site_post_rejected(env):
+    client, data = env
+    resp = client.post("/bids", data={"provider": "gemini", "sample": "ahru-hal-hyd"},
+                       headers={"Origin": "https://evil.example"}, content_type="multipart/form-data")
+    assert resp.status_code == 403
+    assert not (data / "bids").exists() or not any((data / "bids").iterdir())
+    ok = client.post("/bids", data={"provider": "gemini", "sample": "ahru-hal-hyd"},
+                     headers={"Origin": "http://localhost"}, content_type="multipart/form-data")
+    assert ok.status_code == 302
+
+
+def test_rebuild_from_saved_draft(env, monkeypatch):
+    client, data = env
+    url = _new_bid(client)
+    client.post(url + "/draft", data={"provider": "gemini"})
+    bid_dir = next((data / "bids").iterdir())
+    (bid_dir / "card" / "response" / "draft.json").write_text("{}", encoding="utf-8")
+    assert "Rebuild documents" in client.get(url).get_data(as_text=True)
+    seen = {}
+    monkeypatch.setattr(draft, "run_draft", lambda *a, **k: seen.update(k) or RESPONSE_FILES)
+    assert client.post(url + "/rebuild").status_code == 302
+    assert seen["from_draft"].name == "draft.json"
+
+
+def test_decide_survives_corrupt_xlsx(env):
+    client, data = env
+    resp = client.post("/shortlists", data={"provider": "gemini", "files": [(io.BytesIO(b"PK"), "a.xlsx")]},
+                       content_type="multipart/form-data")
+    url = resp.headers["Location"]
+    run_dir = next((data / "shortlists").iterdir())
+    (run_dir / "result" / "shortlist.xlsx").write_bytes(b"not a workbook")
+    r = client.post(url + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Ask"})
+    assert r.status_code == 302 and "msg=" in r.headers["Location"]
+    assert json.loads((run_dir / "decisions.json").read_text())["GEM/2026/B/8082649"] == "Ask"

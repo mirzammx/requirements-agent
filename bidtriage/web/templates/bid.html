@@ -44,6 +44,14 @@
       <div><label>AI model</label><select name="provider">{% for p in providers %}<option value="{{ p }}" {% if p == (meta.provider or default_provider) %}selected{% endif %}>{{ 'Claude (paid)' if p == 'claude' else 'Gemini (free tier, testing only)' }}</option>{% endfor %}</select></div>
       <div style="flex:0"><button class="btn" type="submit" {% if status.state == 'running' %}disabled{% endif %}>{{ 'Regenerate response' if files else 'Generate response' }}</button></div>
     </div>
+  </form>
+  {% if has_saved_draft %}
+  <form method="post" action="{{ url_for('rebuild_bid', bid_id=meta.id) }}" style="margin-top:8px">
+    <button class="btn small secondary" type="submit" {% if status.state == 'running' %}disabled{% endif %}>Rebuild documents from the saved draft</button>
+    <span class="meta">No new AI call: use this after editing the company profile, or if writing the files failed.</span>
+  </form>
+  {% endif %}
+  <form>
     <p class="meta">Drafts the technical compliance, buyer's compliance form, price sheet (no prices), declarations, pre-bid queries and checklist. Everything a person must decide is a yellow [[placeholder]].</p>
   </form>
 </section>

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import threading
 import uuid
 import zipfile
 from datetime import datetime
@@ -40,6 +41,17 @@ FILE_NOTES = {"Technical_Compliance.docx": "Mahadevan: resolve every yellow REVI
               "Checklist.md": "Every document the RFQ requires"}
 
 
+def _unique_name(original: str, taken: set[str]) -> str:
+    """A safe file name that keeps the extension (even for non-English names) and never overwrites."""
+    suffix = Path(original).suffix.lower()
+    suffix = suffix if suffix[1:].isalnum() else ""
+    stem = secure_filename(Path(original).stem) or "upload"
+    name, n = f"{stem}{suffix}", 2
+    while name in taken:
+        name, n = f"{stem}_{n}{suffix}", n + 1
+    return name
+
+
 def _new_id() -> str:
     return f"{datetime.now():%Y%m%d}-{uuid.uuid4().hex[:6]}"
 
@@ -55,13 +67,29 @@ def _default_provider() -> str:
     return "gemini" if os.environ.get("GEMINI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY") else "claude"
 
 
-def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "samples", sync_jobs: bool = False):
+def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "samples", sync_jobs: bool = False,
+               allowed_hosts: set[str] = frozenset({"localhost:8010", "127.0.0.1:8010"})):
     app = Flask(__name__, template_folder=str(ROOT / "bidtriage" / "web" / "templates"))
     app.config.update(MAX_CONTENT_LENGTH=50 * 1024 * 1024, SYNC_JOBS=sync_jobs)
     bids_dir, lists_dir = Path(data_dir) / "bids", Path(data_dir) / "shortlists"
     for d in (bids_dir, lists_dir):
         if d.is_dir():
             jobs.recover([p for p in d.iterdir() if p.is_dir()])
+    allowed_origins = {f"http://{h}" for h in allowed_hosts}
+
+    @app.before_request
+    def same_origin_only():
+        # Another website open in the browser must not drive this app (paid AI calls) or read it
+        # (DNS rebinding): require our own Host, and our own Origin/Referer on any POST that sends one.
+        if request.host not in allowed_hosts:
+            abort(400)
+        if request.method == "POST":
+            origin = request.headers.get("Origin") or ""
+            referer = request.headers.get("Referer") or ""
+            if origin and origin not in allowed_origins:
+                abort(403)
+            if not origin and referer and not any(referer.startswith(o + "/") for o in allowed_origins):
+                abort(403)
 
     @app.context_processor
     def common():
@@ -109,6 +137,8 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
             abort(400)
         if not sample and not files:
             return index_page("Add the bid documents (email .msg/.eml, PDFs, Excel) or pick a sample folder.", 400)
+        if sum(Path(f.filename).suffix.lower() in EMAIL_SUFFIXES for f in files) > 1:
+            return index_page("Upload one email file (.msg or .eml) per bid; add its documents alongside it.", 400)
 
         bid_id = _new_id()
         bid = bids_dir / bid_id
@@ -116,13 +146,18 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         inp.mkdir(parents=True)
         if sample:
             shutil.copytree(Path(samples_dir) / sample, inp, dirs_exist_ok=True)
+        has_email = any(Path(f.filename).suffix.lower() in EMAIL_SUFFIXES for f in files)
+        typed = (subject or body) and not has_email
+        taken = {p.name for p in inp.iterdir()} | ({"email.txt"} if typed else set())
         for f in files:
-            f.save(inp / (secure_filename(f.filename) or "upload"))
-        if (subject or body) and not (inp / "email.txt").exists():
+            name = _unique_name(f.filename, taken)
+            taken.add(name)
+            f.save(inp / name)
+        if typed and not (inp / "email.txt").exists():
             (inp / "email.txt").write_text(f"Subject: {subject}\n\n{body}\n", encoding="utf-8")
 
-        contents = [p for p in inp.iterdir() if p.is_file()]
-        bid_input = contents[0] if len(contents) == 1 and contents[0].suffix.lower() in EMAIL_SUFFIXES else inp
+        # The folder loader handles one email file plus extra documents, or documents plus email.txt.
+        bid_input = inp
         title = subject or sample or (files[0].filename if files else bid_id)
         meta = {"id": bid_id, "title": title, "created": f"{datetime.now():%Y-%m-%d %H:%M}", "provider": provider,
                 "input": str(bid_input.relative_to(bid))}
@@ -143,6 +178,7 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
                                status=status, step_text=STEP_TEXT.get(status.get("step", ""), "Working…"),
                                has_card=(bid / "card" / "card.html").is_file(),
                                can_draft=(bid / "card" / "assessment.json").is_file(), files=files,
+                               has_saved_draft=(response / "draft.json").is_file(),
                                msg=request.args.get("msg", ""))
 
     @app.get("/bids/<bid_id>/card")
@@ -175,9 +211,23 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
                              sync=app.config["SYNC_JOBS"])
         return redirect(url_for("show_bid", bid_id=bid_id, msg="" if started else "A job is already running."))
 
+    @app.post("/bids/<bid_id>/rebuild")
+    def rebuild_bid(bid_id):
+        bid = folder(bids_dir, bid_id)
+        saved = bid / "card" / "response" / "draft.json"
+        if not saved.is_file():
+            abort(400)
+        bid_input = bid / _read_json(bid / "meta.json", {}).get("input", "input")
+        started = jobs.start(bid, "draft",
+                             lambda: draft.run_draft(bid_input, bid / "card", from_draft=saved),
+                             sync=app.config["SYNC_JOBS"])
+        return redirect(url_for("show_bid", bid_id=bid_id, msg="" if started else "A job is already running."))
+
     def response_files(bid: Path) -> list[str]:
+        """Files of the current pack only: a document the latest draft did not need is never offered."""
         summary = _read_json(bid / "card" / "response" / "summary.json", {})
-        return [n for n in summary if (bid / "card" / "response" / n).is_file()]
+        return [n for n, c in summary.items()
+                if (c is not None or n == "Checklist.md") and (bid / "card" / "response" / n).is_file()]
 
     @app.get("/bids/<bid_id>/files/<name>")
     def bid_file(bid_id, name):
@@ -251,14 +301,16 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         tender_id, decision = request.form.get("tender_id", ""), request.form.get("decision", "")
         if decision not in DECISIONS or tender_id not in {i["tender_id"] for i in shortlist_items(run)}:
             abort(400)
-        decisions = _read_json(run / "decisions.json", {})
-        decisions[tender_id] = decision
-        (run / "decisions.json").write_text(json.dumps(decisions, indent=2), encoding="utf-8")
         msg = ""
-        try:
-            _write_decision_to_xlsx(run / "result" / "shortlist.xlsx", tender_id, decision)
-        except OSError:
-            msg = "Decision saved. shortlist.xlsx is open in Excel, so it was not updated; close it and decide again."
+        with DECISION_LOCK:  # two quick clicks must not lose a decision or interleave workbook saves
+            decisions = _read_json(run / "decisions.json", {})
+            decisions[tender_id] = decision
+            _atomic_write_text(run / "decisions.json", json.dumps(decisions, indent=2))
+            try:
+                _write_decision_to_xlsx(run / "result" / "shortlist.xlsx", tender_id, decision)
+            except Exception:
+                msg = ("Decision saved, but shortlist.xlsx could not be updated (is it open in Excel?). "
+                       "Close it and click the decision again to copy it into the workbook.")
         return redirect(url_for("show_shortlist", run_id=run_id, msg=msg) + "#" + _anchor(tender_id))
 
     @app.get("/shortlists/<run_id>/files/<name>")
@@ -277,6 +329,15 @@ def _anchor(tender_id: str) -> str:
     return "t-" + re.sub(r"[^A-Za-z0-9]+", "-", tender_id).strip("-")
 
 
+DECISION_LOCK = threading.Lock()
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _write_decision_to_xlsx(path: Path, tender_id: str, decision: str) -> None:
     import openpyxl
 
@@ -287,7 +348,9 @@ def _write_decision_to_xlsx(path: Path, tender_id: str, decision: str) -> None:
     for row in ws.iter_rows(min_row=2):
         if row[id_col].value == tender_id:
             row[decision_col].value = decision
-    wb.save(path)
+    tmp = path.with_name(path.stem + ".tmp.xlsx")
+    wb.save(tmp)
+    os.replace(tmp, path)
 
 
 if __name__ == "__main__":
