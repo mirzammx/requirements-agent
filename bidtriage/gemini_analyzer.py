@@ -6,6 +6,7 @@ Note: free-tier requests may be used by Google to improve its products.
 """
 
 import base64
+import time
 from datetime import date
 
 import httpx
@@ -20,6 +21,19 @@ DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 # Gemini's limit for a request with inline file data is 20 MB.
 MAX_INLINE_BYTES = 19 * 1024 * 1024
 OK_FINISH = {"STOP", "FINISH_REASON_UNSPECIFIED"}
+# The SDK's retry covers HTTP error codes, not a connection dropped mid-reply; retry those here.
+NETWORK_ATTEMPTS = 3
+NETWORK_RETRY_DELAY = 20
+
+
+def _generate_with_reconnect(client, request: dict):
+    for attempt in range(1, NETWORK_ATTEMPTS + 1):
+        try:
+            return client.models.generate_content(**request)
+        except httpx.HTTPError:
+            if attempt == NETWORK_ATTEMPTS:
+                raise
+            time.sleep(NETWORK_RETRY_DELAY * attempt)
 
 
 def gemini_request(system: str, blocks: list[dict], text: str, schema: type[BaseModel], *,
@@ -76,7 +90,7 @@ def call_gemini(system: str, blocks: list[dict], text: str, schema: type[M], *, 
         # The free tier often answers 503 "high demand"; back off and retry rather than fail at once.
         client = client or genai.Client(http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(
             attempts=5, initial_delay=10, max_delay=120, http_status_codes=[429, 500, 503, 504])))
-        response = client.models.generate_content(**request)
+        response = _generate_with_reconnect(client, request)
     except errors.APIError as exc:
         raise AnalysisError(f"Gemini API error {exc.code}: {exc.message}") from exc
     except httpx.HTTPError as exc:

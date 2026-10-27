@@ -12,7 +12,14 @@
 {% if status.state == 'running' %}
 <div class="notice running"><strong>Working.</strong> {{ step_text }} This page refreshes by itself.</div>
 {% elif status.state == 'failed' %}
-<div class="notice failed"><strong>The {{ status.step }} step failed:</strong> {{ status.error }}</div>
+<div class="notice failed"><strong>The {{ status.step }} step failed:</strong> {{ status.error }}
+  {% if not can_draft or status.step == 'triage' %}
+  <form method="post" action="{{ url_for('retriage_bid', bid_id=meta.id) }}" style="margin-top:10px">
+    <select name="provider" style="width:auto">{% for p in providers %}<option value="{{ p }}" {% if p == (meta.provider or default_provider) %}selected{% endif %}>{{ 'Claude (paid)' if p == 'claude' else 'Gemini (free tier)' }}</option>{% endfor %}</select>
+    <button class="btn small" type="submit">Run triage again</button>
+  </form>
+  {% else %}<div class="meta" style="margin-top:6px">Use the Generate response button below to try again.</div>{% endif %}
+</div>
 {% endif %}
 
 {% if can_draft %}

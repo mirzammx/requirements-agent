@@ -198,3 +198,18 @@ def test_decide_unknown_tender_400(env):
     assert client.post(url + "/decide", data={"tender_id": "NOPE", "decision": "Go"}).status_code == 400
     assert client.post(url + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Maybe"}
                        ).status_code == 400
+
+
+def test_failed_triage_can_be_rerun(env, monkeypatch):
+    client, _ = env
+
+    def boom(*a, **k):
+        raise AnalysisError("could not reach the Gemini API")
+
+    monkeypatch.setattr(triage, "run_triage", boom)
+    url = _new_bid(client)
+    assert "Run triage again" in client.get(url).get_data(as_text=True)
+    monkeypatch.setattr(triage, "run_triage", fake_triage)
+    assert client.post(url + "/triage", data={"provider": "gemini"}).status_code == 302
+    html = client.get(url).get_data(as_text=True)
+    assert "Generate response" in html and "could not reach" not in html

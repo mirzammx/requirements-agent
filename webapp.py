@@ -152,6 +152,16 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
             abort(404)
         return send_file(card)
 
+    @app.post("/bids/<bid_id>/triage")
+    def retriage_bid(bid_id):
+        bid = folder(bids_dir, bid_id)
+        bid_input = bid / _read_json(bid / "meta.json", {}).get("input", "input")
+        provider = provider_arg()
+        started = jobs.start(bid, "triage",
+                             lambda: triage.run_triage(bid_input, provider=provider, out_dir=bid / "card"),
+                             sync=app.config["SYNC_JOBS"])
+        return redirect(url_for("show_bid", bid_id=bid_id, msg="" if started else "A job is already running."))
+
     @app.post("/bids/<bid_id>/draft")
     def draft_bid(bid_id):
         bid = folder(bids_dir, bid_id)

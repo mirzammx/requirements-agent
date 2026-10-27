@@ -120,7 +120,8 @@ def test_default_client_retries_overload_errors(monkeypatch):
     assert retry.attempts >= 4
     assert 503 in retry.http_status_codes and 429 in retry.http_status_codes
 
-def test_network_failure_becomes_analysis_error():
+def test_network_failure_becomes_analysis_error(monkeypatch):
+    monkeypatch.setattr(gemini_analyzer, "NETWORK_RETRY_DELAY", 0)
     import httpx
 
     class Dropping:
@@ -132,3 +133,22 @@ def test_network_failure_becomes_analysis_error():
 
     with pytest.raises(AnalysisError, match="could not reach the Gemini API"):
         call_gemini("SYS", [], "hello", Tiny, client=Dropping(), model="m", effort="low")
+
+def test_dropped_connection_is_retried(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(gemini_analyzer, "NETWORK_RETRY_DELAY", 0)
+    attempts = []
+
+    class Flaky:
+        def __init__(self):
+            self.models = SimpleNamespace(generate_content=self._gen)
+
+        def _gen(self, **kwargs):
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise httpx.RemoteProtocolError("peer closed connection without sending complete message body")
+            return response('{"x": "hi"}')
+
+    assert call_gemini("SYS", [], "hello", Tiny, client=Flaky(), model="m", effort="low") == Tiny(x="hi")
+    assert len(attempts) == 3
