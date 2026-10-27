@@ -23,8 +23,10 @@ from bidtriage.docx_out import (
     build_technical_compliance,
     count_placeholders,
 )
+from bidtriage.draft_schema import ResponseDraft
 from bidtriage.drafter import draft_response
 from bidtriage.email_loader import load_bid
+from bidtriage.guards import apply_guards
 from bidtriage.profile import load_profile
 from bidtriage.schema import BidAssessment
 from bidtriage.xlsx_out import build_price_bid
@@ -39,27 +41,46 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"],
                         help="default: high for Claude; low for Gemini, whose per-request time limit a full "
                              "high-effort draft exceeds")
+    parser.add_argument("--from-draft", help="Re-render documents from a saved draft.json (no model call)")
     args = parser.parse_args(argv)
     effort = args.effort or ("low" if args.provider == "gemini" else "high")
 
     card = Path(args.card)
+    out = card / "response"
+    profile = load_profile()
     try:
-        assessment_file = card / "assessment.json"
-        if not assessment_file.is_file():
-            raise ValueError(f"{assessment_file} not found: run triage.py on this bid first")
-        assessment = BidAssessment.model_validate_json(assessment_file.read_text(encoding="utf-8"))
-        bid = load_bid(args.path)
-        blocks, skipped = to_content_blocks(bid.attachments)
-        print(f"Drafting response for '{bid.subject}' with {args.provider}...", file=sys.stderr)
-        profile = load_profile()
-        draft = draft_response(bid, blocks, skipped, assessment, provider=args.provider, model=args.model,
-                               effort=effort, profile=profile)
-    except (ValueError, ValidationError, PayloadTooLarge, AnalysisError) as exc:
+        if args.from_draft:
+            draft = apply_guards(ResponseDraft.model_validate_json(
+                Path(args.from_draft).read_text(encoding="utf-8")), profile)
+        else:
+            assessment_file = card / "assessment.json"
+            if not assessment_file.is_file():
+                raise ValueError(f"{assessment_file} not found: run triage.py on this bid first")
+            assessment = BidAssessment.model_validate_json(assessment_file.read_text(encoding="utf-8"))
+            bid = load_bid(args.path)
+            blocks, skipped = to_content_blocks(bid.attachments)
+            print(f"Drafting response for '{bid.subject}' with {args.provider}...", file=sys.stderr)
+            draft = draft_response(bid, blocks, skipped, assessment, provider=args.provider, model=args.model,
+                                   effort=effort, profile=profile)
+            # Save the paid-for draft before anything else can fail.
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "draft.json").write_text(draft.model_dump_json(indent=2), encoding="utf-8")
+    except (OSError, ValueError, ValidationError, PayloadTooLarge, AnalysisError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    try:
+        _write_pack(draft, profile, out)
+    except (OSError, ValueError) as exc:
+        print(f"error: could not write the documents ({exc}). Close any open copies in Word/Excel, then re-run "
+              f"with --from-draft {out / 'draft.json'} to regenerate them without a new model call.",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+def _write_pack(draft: ResponseDraft, profile: dict[str, str], out: Path) -> None:
     today = date.today()
-    out = card / "response"
     out.mkdir(parents=True, exist_ok=True)
     docs = {
         "Technical_Compliance.docx": build_technical_compliance(draft, profile),
@@ -76,9 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     build_price_bid(draft).save(out / "Price_Bid.xlsx")
     print(f"{out / 'Price_Bid.xlsx'}: {len(draft.price_lines)} lines to price")
     (out / "Checklist.md").write_text(build_checklist(draft), encoding="utf-8")
-    (out / "draft.json").write_text(draft.model_dump_json(indent=2), encoding="utf-8")
     print(out / "Checklist.md")
-    return 0
 
 
 if __name__ == "__main__":

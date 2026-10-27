@@ -77,3 +77,30 @@ def test_cli_effort_defaults_low_for_gemini_high_for_claude(monkeypatch, bid_and
     draft_cli.main([str(bid), "--card", str(card)])
     draft_cli.main([str(bid), "--card", str(card), "--provider", "gemini", "--effort", "high"])
     assert seen == ["low", "high", "high"]
+
+def test_draft_saved_before_rendering_and_write_error_reported(monkeypatch, capsys, bid_and_card):
+    bid, card = bid_and_card
+    monkeypatch.setattr(draft_cli, "draft_response", lambda *a, **k: sample_draft())
+
+    def locked(*a, **k):
+        raise PermissionError("Technical_Compliance.docx is open in Word")
+
+    monkeypatch.setattr(draft_cli, "build_technical_compliance", locked)
+    assert draft_cli.main([str(bid), "--card", str(card)]) == 1
+    assert (card / "response" / "draft.json").is_file()
+    err = capsys.readouterr().err
+    assert "error:" in err and "--from-draft" in err
+
+
+def test_from_draft_rerenders_without_model_call(monkeypatch, bid_and_card):
+    bid, card = bid_and_card
+    (card / "response").mkdir()
+    saved = card / "response" / "draft.json"
+    saved.write_text(sample_draft().model_dump_json(), encoding="utf-8")
+
+    def no_model(*a, **k):
+        raise AssertionError("model called")
+
+    monkeypatch.setattr(draft_cli, "draft_response", no_model)
+    assert draft_cli.main([str(bid), "--card", str(card), "--from-draft", str(saved)]) == 0
+    assert (card / "response" / "Technical_Compliance.docx").is_file()
