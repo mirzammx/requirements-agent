@@ -22,6 +22,7 @@ DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 MAX_INLINE_BYTES = 19 * 1024 * 1024
 OK_FINISH = {"STOP", "FINISH_REASON_UNSPECIFIED"}
 # The SDK's retry covers HTTP error codes, not a connection dropped mid-reply; retry those here.
+REQUEST_TIMEOUT_MS = 15 * 60 * 1000   # a full response draft takes ~7 min; allow headroom
 NETWORK_ATTEMPTS = 3
 NETWORK_RETRY_DELAY = 20
 
@@ -88,8 +89,11 @@ def call_gemini(system: str, blocks: list[dict], text: str, schema: type[M], *, 
 
     try:
         # The free tier often answers 503 "high demand"; back off and retry rather than fail at once.
-        client = client or genai.Client(http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(
-            attempts=5, initial_delay=10, max_delay=120, http_status_codes=[429, 500, 503, 504])))
+        # A timeout so a stuck connection fails (and is retried) instead of hanging the job for hours.
+        client = client or genai.Client(http_options=types.HttpOptions(
+            timeout=REQUEST_TIMEOUT_MS,
+            retry_options=types.HttpRetryOptions(attempts=5, initial_delay=10, max_delay=120,
+                                                 http_status_codes=[429, 500, 503, 504])))
         response = _generate_with_reconnect(client, request)
     except errors.APIError as exc:
         raise AnalysisError(f"Gemini API error {exc.code}: {exc.message}") from exc

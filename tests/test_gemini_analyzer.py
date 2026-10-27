@@ -119,6 +119,7 @@ def test_default_client_retries_overload_errors(monkeypatch):
     retry = captured["http_options"].retry_options
     assert retry.attempts >= 4
     assert 503 in retry.http_status_codes and 429 in retry.http_status_codes
+    assert captured["http_options"].timeout == 15 * 60 * 1000
 
 def test_network_failure_becomes_analysis_error(monkeypatch):
     monkeypatch.setattr(gemini_analyzer, "NETWORK_RETRY_DELAY", 0)
