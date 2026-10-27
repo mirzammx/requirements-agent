@@ -102,3 +102,18 @@ def test_msg_cloud_embedded_and_broken_attachments_do_not_crash(tmp_path, monkey
     assert "cloud" in reasons["Tender pack"]
     assert "forwarded email" in reasons["Fwd RFQ.msg"]
     assert "could not extract" in reasons["odd.bin"]
+
+
+def test_folder_with_one_email_file_merges_other_files(tmp_path):
+    msg = EmailMessage()
+    msg["Subject"] = "AHRU requirement"
+    msg["From"] = "bd@rugrel.com"
+    msg.set_content("Check feasibility.")
+    msg.add_attachment(b"%PDF-1.4 rfq", maintype="application", subtype="pdf", filename="rfq.pdf")
+    (tmp_path / "bid.eml").write_bytes(msg.as_bytes())
+    (tmp_path / "extra.pdf").write_bytes(b"%PDF-1.4 extra")
+    (tmp_path / "email.txt").write_text("Subject: typed\n\ntyped body", encoding="utf-8")
+    bid = load_bid(tmp_path)
+    assert bid.subject == "AHRU requirement"
+    assert "Check feasibility." in bid.body
+    assert sorted(a.filename for a in bid.attachments) == ["extra.pdf", "rfq.pdf"]

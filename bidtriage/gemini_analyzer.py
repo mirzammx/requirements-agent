@@ -23,15 +23,19 @@ MAX_INLINE_BYTES = 19 * 1024 * 1024
 OK_FINISH = {"STOP", "FINISH_REASON_UNSPECIFIED"}
 # The SDK's retry covers HTTP error codes, not a connection dropped mid-reply; retry those here.
 REQUEST_TIMEOUT_MS = 15 * 60 * 1000   # a full response draft takes ~7 min; allow headroom
+SDK_ATTEMPTS = 3                      # the SDK retries 429/5xx, timeouts and connect errors itself
 NETWORK_ATTEMPTS = 3
 NETWORK_RETRY_DELAY = 20
+# Worst case for a stuck connection: SDK_ATTEMPTS x 15 min = 45 min, after which the job fails visibly.
+DROPPED = (httpx.RemoteProtocolError, httpx.ReadError)
 
 
 def _generate_with_reconnect(client, request: dict):
+    """Retry only a connection dropped mid-reply, which the SDK's own retry does not cover."""
     for attempt in range(1, NETWORK_ATTEMPTS + 1):
         try:
             return client.models.generate_content(**request)
-        except httpx.HTTPError:
+        except DROPPED:
             if attempt == NETWORK_ATTEMPTS:
                 raise
             time.sleep(NETWORK_RETRY_DELAY * attempt)
@@ -92,7 +96,7 @@ def call_gemini(system: str, blocks: list[dict], text: str, schema: type[M], *, 
         # A timeout so a stuck connection fails (and is retried) instead of hanging the job for hours.
         client = client or genai.Client(http_options=types.HttpOptions(
             timeout=REQUEST_TIMEOUT_MS,
-            retry_options=types.HttpRetryOptions(attempts=5, initial_delay=10, max_delay=120,
+            retry_options=types.HttpRetryOptions(attempts=SDK_ATTEMPTS, initial_delay=10, max_delay=120,
                                                  http_status_codes=[429, 500, 503, 504])))
         response = _generate_with_reconnect(client, request)
     except errors.APIError as exc:

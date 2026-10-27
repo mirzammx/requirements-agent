@@ -104,3 +104,28 @@ def test_from_draft_rerenders_without_model_call(monkeypatch, bid_and_card):
     monkeypatch.setattr(draft_cli, "draft_response", no_model)
     assert draft_cli.main([str(bid), "--card", str(card), "--from-draft", str(saved)]) == 0
     assert (card / "response" / "Technical_Compliance.docx").is_file()
+
+def test_rebuild_removes_documents_no_longer_needed(monkeypatch, bid_and_card):
+    bid, card = bid_and_card
+    resp = card / "response"
+    resp.mkdir()
+    (resp / "Compliance_Statement.docx").write_bytes(b"stale form from an earlier draft")
+    d = sample_draft()
+    d.compliance_form_rows = []
+    saved = resp / "draft.json"
+    saved.write_text(d.model_dump_json(), encoding="utf-8")
+    summary = draft_cli.run_draft(bid, card, from_draft=saved)
+    assert summary["Compliance_Statement.docx"] is None
+    assert not (resp / "Compliance_Statement.docx").exists()
+
+
+def test_pack_write_error_message_includes_cause(monkeypatch, bid_and_card):
+    bid, card = bid_and_card
+    monkeypatch.setattr(draft_cli, "draft_response", lambda *a, **k: sample_draft())
+
+    def locked(*a, **k):
+        raise PermissionError("Technical_Compliance.docx is open in Word")
+
+    monkeypatch.setattr(draft_cli, "build_technical_compliance", locked)
+    with pytest.raises(draft_cli.PackWriteError, match="open in Word"):
+        draft_cli.run_draft(bid, card)

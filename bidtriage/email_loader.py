@@ -79,6 +79,15 @@ def _msg_attachment(att, AttachmentType) -> Attachment:
 
 
 def _load_folder(path: Path) -> Bid:
+    files = sorted(f for f in path.iterdir() if f.is_file())
+    emails = [f for f in files if f.suffix.lower() in (".msg", ".eml")]
+    if len(emails) == 1:
+        # An email saved from Outlook plus extra documents: the email is the bid, the rest are attachments.
+        bid = load_bid(emails[0])
+        bid.attachments += [Attachment(f.name, f.read_bytes(), mimetypes.guess_type(f.name)[0] or "")
+                            for f in files if f != emails[0] and f.name != EMAIL_TXT]
+        bid.source_path = str(path)
+        return bid
     headers: dict[str, str] = {}
     body = ""
     email_txt = path / EMAIL_TXT

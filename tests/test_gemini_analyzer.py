@@ -117,7 +117,7 @@ def test_default_client_retries_overload_errors(monkeypatch):
     monkeypatch.setattr(genai, "Client", FakeClientCls)
     call_gemini("SYS", [], "hello", Tiny, model="m", effort="low")
     retry = captured["http_options"].retry_options
-    assert retry.attempts >= 4
+    assert retry.attempts >= 3
     assert 503 in retry.http_status_codes and 429 in retry.http_status_codes
     assert captured["http_options"].timeout == 15 * 60 * 1000
 
@@ -153,3 +153,21 @@ def test_dropped_connection_is_retried(monkeypatch):
 
     assert call_gemini("SYS", [], "hello", Tiny, client=Flaky(), model="m", effort="low") == Tiny(x="hi")
     assert len(attempts) == 3
+
+def test_timeouts_are_left_to_the_sdk_retry(monkeypatch):
+    import httpx
+
+    monkeypatch.setattr(gemini_analyzer, "NETWORK_RETRY_DELAY", 0)
+    attempts = []
+
+    class Slow:
+        def __init__(self):
+            self.models = SimpleNamespace(generate_content=self._gen)
+
+        def _gen(self, **kwargs):
+            attempts.append(1)
+            raise httpx.ReadTimeout("timed out")
+
+    with pytest.raises(AnalysisError):
+        call_gemini("SYS", [], "hello", Tiny, client=Slow(), model="m", effort="low")
+    assert len(attempts) == 1

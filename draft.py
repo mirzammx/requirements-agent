@@ -65,8 +65,9 @@ def main(argv: list[str] | None = None) -> int:
 class PackWriteError(Exception):
     """The draft was obtained (and saved) but writing the documents failed."""
 
-    def __init__(self, draft_path: Path):
-        super().__init__(f"could not write documents; draft saved at {draft_path}")
+    def __init__(self, draft_path: Path, cause: Exception):
+        super().__init__(f"could not write the documents ({cause}); the draft is saved at {draft_path} and the "
+                         "documents can be rebuilt from it without a new model call")
         self.draft_path = draft_path
 
 
@@ -101,7 +102,7 @@ def run_draft(path, card_dir: Path, *, provider: str = "claude", model: str | No
     try:
         return _write_pack(draft, profile, out)
     except (OSError, ValueError) as exc:
-        raise PackWriteError(out / "draft.json") from exc
+        raise PackWriteError(out / "draft.json", exc) from exc
 
 
 def _write_pack(draft: ResponseDraft, profile: dict[str, str], out: Path) -> dict[str, int | None]:
@@ -116,6 +117,8 @@ def _write_pack(draft: ResponseDraft, profile: dict[str, str], out: Path) -> dic
     }
     for name, doc in docs.items():
         if doc is None:
+            # Remove any copy from an earlier draft so an outdated form cannot be submitted.
+            (out / name).unlink(missing_ok=True)
             summary[name] = None
             continue
         doc.save(out / name)
