@@ -32,15 +32,27 @@ def test_totals_are_formulas():
     row = _line_row(ws, "Indigenised PSM (ESS Units)")
     r = row[0].row
     assert row[4].value == f"=IF(D{r}=\"\",\"\",C{r}*D{r})"
-    assert row[6].value == f"=IF(OR(E{r}=\"\",F{r}=\"\"),\"\",E{r}*(1+F{r}/100))"
+    assert row[6].value == f"=IF(E{r}=\"\",\"\",IF(F{r}=\"\",\"GST %?\",E{r}*(1+IF(F{r}>1,F{r}/100,F{r}))))"
+    assert row[5].number_format == "0%"
     values = [v for line in _rows(ws) for v in line if isinstance(v, str)]
     assert any(v.startswith("=SUM(") for v in values)
     assert "Grand Total" in values
 
 
-def test_non_numeric_qty_leaves_formula_cells_blank():
+def test_quantity_with_units_or_commas_still_calculates():
+    d = sample_draft()
+    d.price_lines = [PriceLine(phase="PP", sno="1", description="Modules", qty="10 Nos"),
+                     PriceLine(phase="PP", sno="2", description="Spares", qty="1,000")]
+    ws = build_price_bid(d).active
+    modules, spares = _line_row(ws, "Modules (qty as stated: 10 Nos)"), _line_row(ws, "Spares")
+    assert modules[2].value == 10 and spares[2].value == 1000
+    assert modules[4].value.startswith("=IF(") and spares[4].value.startswith("=IF(")
+
+
+def test_non_numeric_qty_is_flagged_not_silently_dropped():
     d = sample_draft()
     d.price_lines = [PriceLine(phase="PP", sno="1", description="Spares", qty="as required")]
     row = _line_row(build_price_bid(d).active, "Spares")
     assert row[2].value == "as required"
-    assert row[4].value is None and row[6].value is None
+    assert row[4].value == "[[QTY?]]"
+    assert row[4].fill.fgColor.rgb.endswith("FFFF00")

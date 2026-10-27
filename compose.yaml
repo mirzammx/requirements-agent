@@ -1,6 +1,6 @@
 # Usage (PowerShell, from the project folder):
 #   docker compose run --rm bid triage.py samples/ahru-hal-hyd --provider gemini
-#   docker compose run --rm bid draft.py samples/ahru-hal-hyd --provider gemini
+#   docker compose run --rm bid draft.py samples/ahru-hal-hyd --card out/<date>_<rfq> --provider gemini
 #   docker compose run --rm bid -m pytest
 services:
   bid:

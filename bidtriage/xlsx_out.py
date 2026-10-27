@@ -4,6 +4,8 @@ Unit price and GST % cells are empty and yellow; every total is a formula, so BD
 only types unit prices and GST rates.
 """
 
+import re
+
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
@@ -15,15 +17,17 @@ YELLOW = PatternFill("solid", fgColor="FFFF00")
 BOLD = Font(bold=True)
 
 
-def _qty(value: str):
-    text = value.strip()
-    try:
-        return int(text)
-    except ValueError:
-        try:
-            return float(text)
-        except ValueError:
-            return text
+LEADING_NUMBER = re.compile(r"^\s*(\d[\d,]*(?:\.\d+)?)")
+
+
+def _qty(value: str) -> tuple[int | float | None, bool]:
+    """(numeric quantity or None, whether the stated text had more than the number)."""
+    match = LEADING_NUMBER.match(value)
+    if not match:
+        return None, True
+    number = match.group(1).replace(",", "")
+    qty = float(number) if "." in number else int(number)
+    return qty, value.strip() != match.group(1)
 
 
 def build_price_bid(draft: ResponseDraft) -> Workbook:
@@ -50,14 +54,23 @@ def build_price_bid(draft: ResponseDraft) -> Workbook:
         ws.cell(ws.max_row, 1).font = BOLD
         first = ws.max_row + 1
         for line in lines:
-            qty = _qty(line.qty)
-            ws.append([line.sno, line.description, qty])
+            qty, has_extra_text = _qty(line.qty)
+            description = line.description
+            if qty is not None and has_extra_text:
+                description += f" (qty as stated: {line.qty.strip()})"
+            ws.append([line.sno, description, qty if qty is not None else line.qty])
             r = ws.max_row
             ws.cell(r, 4).fill = YELLOW
             ws.cell(r, 6).fill = YELLOW
-            if isinstance(qty, (int, float)):
-                ws.cell(r, 5).value = f'=IF(D{r}="","",C{r}*D{r})'
-                ws.cell(r, 7).value = f'=IF(OR(E{r}="",F{r}=""),"",E{r}*(1+F{r}/100))'
+            ws.cell(r, 6).number_format = "0%"
+            if qty is None:
+                # No number to multiply: flag it rather than drop the line from the totals silently.
+                ws.cell(r, 5).value = "[[QTY?]]"
+                ws.cell(r, 5).fill = YELLOW
+                continue
+            ws.cell(r, 5).value = f'=IF(D{r}="","",C{r}*D{r})'
+            # GST may be typed as 18 or 18%; a priced line without GST shows "GST %?" instead of vanishing.
+            ws.cell(r, 7).value = f'=IF(E{r}="","",IF(F{r}="","GST %?",E{r}*(1+IF(F{r}>1,F{r}/100,F{r}))))'
         last = ws.max_row
         ws.append(["", f"Sub Total ({phase})", "", "", f"=SUM(E{first}:E{last})", "", f"=SUM(G{first}:G{last})"])
         for cell in ws[ws.max_row]:
