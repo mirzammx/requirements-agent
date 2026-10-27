@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% set refresh = status.state == 'running' %}
+{% block title %}{{ meta.title }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="eyebrow">Bid</div>
+  <h1>{{ meta.title }}</h1>
+  <p class="meta" style="margin:0">Created {{ meta.created }}</p>
+</section>
+
+{% if msg %}<div class="notice info">{{ msg }}</div>{% endif %}
+{% if status.state == 'running' %}
+<div class="notice running"><strong>Working.</strong> {{ step_text }} This page refreshes by itself.</div>
+{% elif status.state == 'failed' %}
+<div class="notice failed"><strong>The {{ status.step }} step failed:</strong> {{ status.error }}</div>
+{% endif %}
+
+{% if can_draft %}
+<section class="card">
+  <h2>Response pack {% if files %}<span class="count">{{ files|length }} files</span>{% endif %}</h2>
+  {% if files %}
+  <div class="tablewrap"><table>
+    <tr><th>File</th><th>To complete</th><th>Who / what</th><th></th></tr>
+    {% for f in files %}
+    <tr>
+      <td>{{ f.name }}</td>
+      <td>{% if f.count is none %}{{ '—' if f.exists else 'not needed for this RFQ' }}{% elif f.name.endswith('.xlsx') %}{{ f.count }} lines to price{% else %}{{ f.count }} placeholders{% endif %}</td>
+      <td class="src">{{ f.note }}</td>
+      <td>{% if f.exists %}<a class="btn small secondary" href="{{ url_for('bid_file', bid_id=meta.id, name=f.name) }}">Download</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  <p style="margin:14px 0 0"><a class="btn" href="{{ url_for('bid_zip', bid_id=meta.id) }}">Download all (.zip)</a></p>
+  {% endif %}
+  <form method="post" action="{{ url_for('draft_bid', bid_id=meta.id) }}" style="margin-top:16px">
+    <div class="row">
+      <div><label>AI model</label><select name="provider">{% for p in providers %}<option value="{{ p }}" {% if p == (meta.provider or default_provider) %}selected{% endif %}>{{ 'Claude (paid)' if p == 'claude' else 'Gemini (free tier, testing only)' }}</option>{% endfor %}</select></div>
+      <div style="flex:0"><button class="btn" type="submit" {% if status.state == 'running' %}disabled{% endif %}>{{ 'Regenerate response' if files else 'Generate response' }}</button></div>
+    </div>
+    <p class="meta">Drafts the technical compliance, buyer's compliance form, price sheet (no prices), declarations, pre-bid queries and checklist. Everything a person must decide is a yellow [[placeholder]].</p>
+  </form>
+</section>
+{% endif %}
+
+{% if has_card %}
+<section class="card">
+  <h2>Triage card <a class="btn small secondary" href="{{ url_for('bid_card', bid_id=meta.id) }}" target="_blank">Open in new tab</a></h2>
+  <iframe src="{{ url_for('bid_card', bid_id=meta.id) }}" title="Triage card"></iframe>
+</section>
+{% endif %}
+{% endblock %}

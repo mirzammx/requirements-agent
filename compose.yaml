@@ -1,7 +1,10 @@
 # Usage (PowerShell, from the project folder):
-#   docker compose run --rm bid triage.py samples/ahru-hal-hyd --provider gemini
-#   docker compose run --rm bid draft.py samples/ahru-hal-hyd --card out/<date>_<rfq> --provider gemini
-#   docker compose run --rm bid -m pytest
+#   Web app (buttons):  docker compose up web      then open http://localhost:8000   (Ctrl+C to stop)
+#   Command line:
+#     docker compose run --rm bid shortlist.py "samples/Power supply-Tender List_26092026.xlsx" --provider gemini
+#     docker compose run --rm bid triage.py samples/ahru-hal-hyd --provider gemini
+#     docker compose run --rm bid draft.py samples/ahru-hal-hyd --card out/<date>_<rfq> --provider gemini
+#     docker compose run --rm bid -m pytest
 services:
   bid:
     build: .
@@ -12,3 +15,19 @@ services:
     environment:
       - ANTHROPIC_API_KEY
       - GEMINI_API_KEY
+      - TZ=Asia/Kolkata
+
+  web:
+    image: rugrel-bid-tools
+    build: .
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      - ANTHROPIC_API_KEY
+      - GEMINI_API_KEY
+      - TZ=Asia/Kolkata
+    command: ["webapp.py"]
+    # Only this PC can reach the app.
+    ports:
+      - "127.0.0.1:8000:8000"

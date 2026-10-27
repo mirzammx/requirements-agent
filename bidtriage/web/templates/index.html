@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% macro provider_select() %}
+<label>AI model</label>
+<select name="provider">
+  {% for p in providers %}<option value="{{ p }}" {% if p == default_provider %}selected{% endif %}>{{ 'Claude (paid)' if p == 'claude' else 'Gemini (free tier, testing only)' }}</option>{% endfor %}
+</select>
+{% endmacro %}
+{% block content %}
+{% if error %}<div class="notice failed">{{ error }}</div>{% endif %}
+
+<section class="card">
+  <h2>1 · Screen BidAssist exports</h2>
+  <p class="meta" style="margin-top:0">Upload the "Tender List" Excel files from BidAssist alert emails. Real power supply tenders are separated from the keyword noise.</p>
+  <form method="post" action="{{ url_for('create_shortlist') }}" enctype="multipart/form-data">
+    <div class="row">
+      <div><label>BidAssist .xlsx files</label><input type="file" name="files" accept=".xlsx" multiple></div>
+      <div>{{ provider_select() }}</div>
+      <div style="flex:0"><button class="btn" type="submit">Screen</button></div>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>2 · New bid</h2>
+  <p class="meta" style="margin-top:0">Upload the bid email saved from Outlook (.msg), or the RFQ PDFs and sheets with the email text below. A triage card is produced for the Go / No-go decision; the response pack is generated from the bid page.</p>
+  <form method="post" action="{{ url_for('create_bid') }}" enctype="multipart/form-data">
+    <label>Bid documents (.msg, .eml, .pdf, .xlsx, .csv)</label>
+    <input type="file" name="files" multiple>
+    <div class="row">
+      <div><label>Subject (optional)</label><input type="text" name="subject" placeholder="e.g. AHRU Power Supply Requirement - HAL Hyderabad"></div>
+    </div>
+    <label>Email text (optional)</label>
+    <textarea name="body" placeholder="Paste the BD email here if you uploaded PDFs instead of the .msg"></textarea>
+    {% if samples %}
+    <div class="or">or</div>
+    <label>Use a folder from samples/</label>
+    <select name="sample"><option value="">(none)</option>{% for s in samples %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select>
+    {% endif %}
+    <div class="row">
+      <div>{{ provider_select() }}</div>
+      <div style="flex:0"><button class="btn" type="submit">Run triage</button></div>
+    </div>
+  </form>
+</section>
+
+<section class="card list">
+  <h2>Recent shortlists <span class="count">{{ shortlists|length }}</span></h2>
+  {% for s in shortlists %}
+  <div style="margin:6px 0"><a href="{{ url_for('show_shortlist', run_id=s.id) }}">{{ s.title }}</a>
+    <span class="state {{ s.status.state }}">{{ s.status.state }}</span> <span class="meta">{{ s.created }}</span></div>
+  {% else %}<p class="none">None yet.</p>{% endfor %}
+</section>
+
+<section class="card list">
+  <h2>Recent bids <span class="count">{{ bids|length }}</span></h2>
+  {% for b in bids %}
+  <div style="margin:6px 0"><a href="{{ url_for('show_bid', bid_id=b.id) }}">{{ b.title }}</a>
+    <span class="state {{ b.status.state }}">{{ b.status.step ~ ' ' if b.status.step }}{{ b.status.state }}</span> <span class="meta">{{ b.created }}</span></div>
+  {% else %}<p class="none">None yet.</p>{% endfor %}
+</section>
+{% endblock %}

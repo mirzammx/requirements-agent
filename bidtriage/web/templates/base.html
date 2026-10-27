@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+{% if refresh %}<meta http-equiv="refresh" content="5">{% endif %}
+<title>{% block title %}Bid desk{% endblock %} · Rug-Rel SBU-2</title>
+<style>
+{{ css|safe }}
+nav{display:flex;align-items:center;gap:16px;margin-bottom:16px}
+nav a{color:var(--accent);text-decoration:none;font-weight:600}
+nav .brand{font-size:18px;color:var(--text)}
+a{color:var(--accent)}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input[type=text],textarea,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;
+  background:var(--card);color:var(--text);font:inherit}
+textarea{min-height:70px}
+input[type=file]{font:inherit}
+.btn{display:inline-block;border:0;border-radius:6px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer;
+  background:var(--accent);color:#fff;text-decoration:none}
+.btn.secondary{background:var(--grey-bg);color:var(--text)}
+.btn.small{padding:4px 10px;font-size:13px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.row>*{flex:1;min-width:180px}
+.notice{padding:10px 14px;border-radius:8px;margin-bottom:16px}
+.notice.running{background:var(--ask-bg);border:1px solid var(--ask-line)}
+.notice.failed{background:var(--high-bg);color:var(--high)}
+.notice.info{background:var(--grey-bg)}
+.list a{font-weight:600}
+.state{font-size:12px;font-weight:600;border-radius:4px;padding:1px 7px;margin-left:6px;background:var(--grey-bg);
+  color:var(--muted)}
+.state.running{background:var(--ask-bg);color:var(--med)}.state.failed{background:var(--high-bg);color:var(--high)}
+.state.done{background:var(--ok-bg);color:var(--ok)}
+.or{color:var(--muted);text-align:center;margin:8px 0}
+iframe{width:100%;height:1100px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.decide form{display:inline}
+.decide .btn.chosen{outline:3px solid var(--text)}
+</style>
+</head>
+<body>
+<main class="wrap">
+<nav><a class="brand" href="{{ url_for('index') }}">Bid desk · SBU-2</a></nav>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
