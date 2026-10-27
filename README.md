@@ -19,6 +19,22 @@ Credentials: set `$env:ANTHROPIC_API_KEY = "..."` for Claude, or `$env:GEMINI_AP
 
 **Gemini (proof-of-concept only):** add `--provider gemini` (default model `gemini-3.8-flash`). Free-tier keys from aistudio.google.com work, but Google may use free-tier requests to improve its products, so the production setup is Claude on paid billing. The free tier often returns 503 "high demand"; retry, or try `--model gemini-3.6-flash`.
 
+## Web app (buttons)
+
+```powershell
+$env:GEMINI_API_KEY = "..."      # or $env:ANTHROPIC_API_KEY
+docker compose up -d web          # start; then open http://localhost:8010
+docker compose down               # stop
+```
+
+- **Screen**: upload BidAssist "Tender List" .xlsx files. Candidates get **Go / No-go / Ask** buttons; decisions are saved into the tracker.
+- **Run triage**: upload the bid email (.msg) or the RFQ PDFs plus the email text. The card appears on the bid page.
+- **Generate response**: on the bid page. Then download each file, or **Download all (.zip)**.
+
+Long steps run in the background; the page shows "Working…" and refreshes itself. Everything is stored under `data/` (git-ignored). The app is reachable from this PC only (port 8010, because 8000 is used by another local app).
+
+The same steps are also available as commands:
+
 ## 0. Screen the BidAssist alerts
 
 Save the Excel files attached to the BidAssist alert emails (`<alert>-Tender List_<date>.xlsx`) and run:

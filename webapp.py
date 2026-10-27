@@ -1,6 +1,6 @@
 """Local web app: buttons for shortlist -> decision -> triage -> card -> response -> download.
 
-Run in Docker:  docker compose up web   then open http://localhost:8000
+Run in Docker:  docker compose up web   then open http://localhost:8010
 """
 
 import io

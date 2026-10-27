@@ -1,5 +1,5 @@
 # Usage (PowerShell, from the project folder):
-#   Web app (buttons):  docker compose up web      then open http://localhost:8000   (Ctrl+C to stop)
+#   Web app (buttons):  docker compose up web      then open http://localhost:8010   (Ctrl+C to stop)
 #   Command line:
 #     docker compose run --rm bid shortlist.py "samples/Power supply-Tender List_26092026.xlsx" --provider gemini
 #     docker compose run --rm bid triage.py samples/ahru-hal-hyd --provider gemini
@@ -30,4 +30,4 @@ services:
     command: ["webapp.py"]
     # Only this PC can reach the app.
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8010:8000"
