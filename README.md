@@ -33,6 +33,17 @@ docker compose down               # stop
 
 Long steps run in the background; the page shows "Working…" and refreshes itself. Everything is stored under `data/` (git-ignored). The app is reachable from this PC only (port 8010, because 8000 is used by another local app).
 
+### Straight from Outlook (mail watcher)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\mailwatch.ps1        # keep running; Ctrl+C to stop
+```
+
+- Put BD's bid mails and BidAssist alert mails into the Outlook folder **Inbox › Bid desk** (drag them, or add an Outlook rule). The watcher picks each one up once and tags it "Bid desk: picked up".
+- A bid mail becomes a bid and is triaged. A BidAssist alert is screened, but only its **Power supply** list (`prompts/intake.toml` › `screen_alerts`); "My Preference" is ignored for now.
+- After Mahadevan's Go / No-go / Ask on the card, the reply to BD is created as a **ReplyAll draft in your Outlook Drafts**, with Mahadevan in CC and the response pack attached on Go. It is never sent automatically.
+- Needs classic Outlook open and the web app running.
+
 The same steps are also available as commands:
 
 ## 0. Screen the BidAssist alerts
