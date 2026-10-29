@@ -1,0 +1,11 @@
+# Mail intake settings (read by the Bid desk app).
+
+# BidAssist alerts to screen. Each alert email carries "<alert>-Tender List_<date>.xlsx";
+# only these alerts are analysed, the rest (e.g. "My Preference") are ignored for now.
+screen_alerts = ["Power supply"]
+
+# CC on every reply drafted to BD.
+mahadevan_email = "mahadevan.velvalli@rugrel.com"
+
+# Last line of every reply drafted to BD.
+signature = "On behalf of Mahadevan, SBU-2 (Power Electronics), Rug-Rel Components & Systems"
