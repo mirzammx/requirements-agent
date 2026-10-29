@@ -1,25 +1,32 @@
 {% extends "base.html" %}
+{% from "_macros.html" import crumbs %}
 {% set refresh = status.state == 'running' %}
 {% block title %}Shortlist {{ meta.created }}{% endblock %}
+{% block crumbs %}{{ crumbs([("Overview", url_for('index')), ("Shortlists", url_for('list_shortlists')), ("Shortlist " ~ (meta.created or ''), None)]) }}{% endblock %}
 {% macro tender(t, with_buttons) %}
+{% set choice = decisions.get(t.tender_id) %}
 <div class="tender{% if t.days_left is not none and t.days_left < 0 %} closed{% endif %}" id="{{ t.tender_id|anchor }}">
   <div class="title">{{ t.summary }}{% if t.corrigendum %}<span class="tag">corrigendum</span>{% endif %}{% if t.confidence %}<span class="tag">{{ t.confidence }} confidence</span>{% endif %}</div>
   <div class="meta">{{ t.authority }} · {{ t.location }} · {{ t.tender_no or t.tender_id }}</div>
   <div class="meta">
-    {% if t.days_left is none %}Closes {{ t.closing_date or 'date not given' }}
-    {% elif t.days_left < 0 %}Closed {{ t.closing_date }}
-    {% else %}<span class="{{ 'urgent' if t.days_left <= 3 }}">Closes {{ t.closing_date }} ({{ t.days_left }} days left)</span>{% endif %}
+    {% if t.days_left is not none and 0 <= t.days_left <= 3 %}<span class="urgent">{{ t|closes }}</span>{% else %}{{ t|closes }}{% endif %}
     · Value {{ t.amount or '-' }} · EMD {{ t.emd or '-' }}
   </div>
   <p style="margin:6px 0">{{ t.reason }}</p>
   {% if with_buttons %}
-  <div class="decide">
-    {% for d in ('Go', 'No-go', 'Ask') %}
-    <form method="post" action="{{ url_for('decide', run_id=meta.id) }}">
+  <div class="tender-actions">
+    <span class="meta">BD:</span>
+    {% for d, label in (('Fetch', 'Fetch documents'), ('Skip', 'Skip')) %}
+    <form class="inline-form" method="post" action="{{ url_for('decide', run_id=meta.id) }}">
       <input type="hidden" name="tender_id" value="{{ t.tender_id }}"><input type="hidden" name="decision" value="{{ d }}">
-      <button class="btn small {{ 'chosen' if decisions.get(t.tender_id) == d else 'secondary' }}" type="submit">{{ d }}</button>
+      <button class="btn small {{ 'chosen' if choice == d else 'secondary' }}" type="submit">{{ label }}</button>
     </form>
     {% endfor %}
+    {% if t.tender_id in bids %}
+    <a class="btn small" href="{{ url_for('show_bid', bid_id=bids[t.tender_id]) }}">Open bid →</a>
+    {% elif choice == 'Fetch' %}
+    <a class="btn small" href="{{ url_for('new_bid', shortlist=meta.id, tender=t.tender_id) }}">Start bid → upload the RFQ</a>
+    {% endif %}
   </div>
   {% endif %}
 </div>
@@ -41,13 +48,13 @@
 {% if status.state == 'running' %}
 <div class="notice running"><strong>Working.</strong> {{ step_text }} This page refreshes by itself.</div>
 {% elif status.state == 'failed' %}
-<div class="notice failed"><strong>Screening failed:</strong> {{ status.error }}</div>
+<div class="notice failed"><strong>Screening failed:</strong> {{ status.error }} <a href="{{ url_for('list_shortlists') }}">Upload the export again</a>.</div>
 {% endif %}
 
 {% if total %}
 <section class="card">
   <h2>SBU-2 power supply candidates <span class="count">{{ groups.sbu2_power|length }}</span></h2>
-  <p class="meta" style="margin-top:0">Decide each one. Go / No-go / Ask is saved and written into the tracker's Decision column.</p>
+  <p class="meta" style="margin-top:0">BD: fetch the RFQ documents for the tenders worth a look, then press <strong>Start bid</strong> to upload them. Mahadevan decides Go / No-go later, on the triage card.</p>
   {% for t in groups.sbu2_power %}{{ tender(t, true) }}{% else %}<p class="none">None in this export.</p>{% endfor %}
 </section>
 

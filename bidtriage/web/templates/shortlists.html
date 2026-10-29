@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_macros.html" import crumbs, screen_form %}
+{% block title %}Shortlists{% endblock %}
+{% block crumbs %}{{ crumbs([("Overview", url_for('index')), ("Shortlists", None)]) }}{% endblock %}
+{% block content %}
+{% if error %}<div class="notice failed">{{ error }}</div>{% endif %}
+<section class="card">
+  <h2>Screen BidAssist exports</h2>
+  {{ screen_form() }}
+</section>
+<section class="card">
+  <h2>All shortlists <span class="count">{{ shortlists|length }}</span></h2>
+  {% for s in shortlists %}
+  <div class="list-row">
+    <div class="main"><a href="{{ url_for('show_shortlist', run_id=s.id) }}">{{ s.title }}</a>
+      <span class="state {{ s.status.state }}">{{ s.status.state }}</span><div class="meta">{{ s.created }}</div></div>
+    <a class="btn small secondary" href="{{ url_for('show_shortlist', run_id=s.id) }}">Open</a>
+  </div>
+  {% else %}<p class="none">None yet. Upload a BidAssist export above.</p>{% endfor %}
+</section>
+{% endblock %}

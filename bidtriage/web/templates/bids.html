@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_macros.html" import crumbs, bid_badge %}
+{% block title %}Bids{% endblock %}
+{% block crumbs %}{{ crumbs([("Overview", url_for('index')), ("Bids", None)]) }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>All bids <span class="count">{{ bids|length }}</span></h2>
+  {% for s in bids %}
+  <div class="list-row">
+    <div class="main"><a href="{{ url_for('show_bid', bid_id=s.meta.id) }}">{{ s.meta.title }}</a> {{ bid_badge(s) }}
+      <div class="meta">{{ s.meta.created }} · next: {{ s.next_action.text }}</div></div>
+    <a class="btn small secondary" href="{{ url_for('show_bid', bid_id=s.meta.id) }}">Open</a>
+  </div>
+  {% else %}<p class="none">No bids yet.</p>{% endfor %}
+  <div class="quick" style="margin-top:12px"><a class="btn" href="{{ url_for('new_bid') }}">+ New bid</a></div>
+</section>
+{% endblock %}

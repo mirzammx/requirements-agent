@@ -110,7 +110,7 @@ def build_tracker(items: list[Shortlisted]) -> Workbook:
                    "Y" if t.corrigendum else "N", t.source, None, None])
     decision_col = TRACKER_COLUMNS.index("Decision") + 1
     letter = ws.cell(1, decision_col).column_letter
-    dv = DataValidation(type="list", formula1='"Go,No-go,Ask"', allow_blank=True)
+    dv = DataValidation(type="list", formula1='"Fetch,Skip"', allow_blank=True)
     ws.add_data_validation(dv)
     dv.add(f"{letter}2:{letter}{max(ws.max_row, 2)}")
     yellow = PatternFill("solid", fgColor="FFFF00")

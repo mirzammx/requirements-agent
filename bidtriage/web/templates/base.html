@@ -7,40 +7,75 @@
 <title>{% block title %}Bid desk{% endblock %} · Rug-Rel SBU-2</title>
 <style>
 {{ css|safe }}
-nav{display:flex;align-items:center;gap:16px;margin-bottom:16px}
-nav a{color:var(--accent);text-decoration:none;font-weight:600}
-nav .brand{font-size:18px;color:var(--text)}
+.topbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.topbar .brand{font-size:17px;font-weight:700;color:var(--text);text-decoration:none;margin-right:14px}
+.topbar a.tab{color:var(--muted);text-decoration:none;font-weight:600;padding:6px 12px;border-radius:6px}
+.topbar a.tab:hover{background:var(--grey-bg);color:var(--text)}
+.topbar a.tab.active{background:var(--grey-bg);color:var(--text)}
+.topbar .spacer{flex:1}
+.crumbs{font-size:13px;color:var(--muted);margin:0 0 14px}
+.crumbs a{color:var(--muted)}
+.crumbs .sep{margin:0 6px}
 a{color:var(--accent)}
 label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
 input[type=text],textarea,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;
   background:var(--card);color:var(--text);font:inherit}
-textarea{min-height:70px}
+textarea{min-height:90px}
 input[type=file]{font:inherit}
 .btn{display:inline-block;border:0;border-radius:6px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer;
-  background:var(--accent);color:#fff;text-decoration:none}
+  background:var(--accent);color:#fff;text-decoration:none;line-height:1.3}
 .btn.secondary{background:var(--grey-bg);color:var(--text)}
-.btn.small{padding:4px 10px;font-size:13px}
+.btn.small{padding:5px 11px;font-size:13px}
 .btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
 .row>*{flex:1;min-width:180px}
 .notice{padding:10px 14px;border-radius:8px;margin-bottom:16px}
 .notice.running{background:var(--ask-bg);border:1px solid var(--ask-line)}
 .notice.failed{background:var(--high-bg);color:var(--high)}
 .notice.info{background:var(--grey-bg)}
-.list a{font-weight:600}
 .state{font-size:12px;font-weight:600;border-radius:4px;padding:1px 7px;margin-left:6px;background:var(--grey-bg);
-  color:var(--muted)}
+  color:var(--muted);white-space:nowrap}
 .state.running{background:var(--ask-bg);color:var(--med)}.state.failed{background:var(--high-bg);color:var(--high)}
-.state.done{background:var(--ok-bg);color:var(--ok)}
+.state.done,.state.go{background:var(--ok-bg);color:var(--ok)}.state.no-go{background:var(--high-bg);color:var(--high)}
 .or{color:var(--muted);text-align:center;margin:8px 0}
 iframe{width:100%;height:1100px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
-.decide form{display:inline}
-.decide .btn.chosen{outline:3px solid var(--text)}
+.inline-form{display:inline}
+.btn.chosen{outline:3px solid var(--text);outline-offset:1px}
+/* step tracker */
+.steps{display:flex;gap:0;list-style:none;margin:0;padding:0;counter-reset:s;flex-wrap:wrap}
+.steps li{flex:1;min-width:120px;position:relative;padding:10px 10px 10px 40px;font-size:13px;font-weight:600;color:var(--muted)}
+.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:10px;top:9px;width:22px;height:22px;
+  border-radius:50%;display:grid;place-items:center;font-size:12px;background:var(--grey-bg);color:var(--muted)}
+.steps li.done{color:var(--text)}.steps li.done::before{content:"✓";background:var(--ok-bg);color:var(--ok)}
+.steps li.current{color:var(--text)}.steps li.current::before{background:var(--accent);color:#fff}
+.next{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:12px;padding:12px 14px;border-radius:8px;
+  background:var(--ask-bg);border:1px solid var(--ask-line)}
+.next p{margin:0;flex:1;min-width:220px}
+/* lists */
+.list-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.list-row:last-child{border-bottom:0}
+.list-row .main{flex:1;min-width:220px}
+.list-row .main a{font-weight:600}
+.who{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-radius:4px;padding:2px 7px;
+  background:var(--grey-bg);color:var(--muted);white-space:nowrap}
+.who.Mahadevan{background:var(--med-bg);color:var(--med)}.who.BD{background:var(--ok-bg);color:var(--ok)}
+.who.Retry{background:var(--high-bg);color:var(--high)}
+.quick{display:flex;gap:10px;flex-wrap:wrap}
+.tender-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
 </style>
 </head>
 <body>
 <main class="wrap">
-<nav><a class="brand" href="{{ url_for('index') }}">Bid desk · SBU-2</a></nav>
+<nav class="topbar" aria-label="Main">
+  <a class="brand" href="{{ url_for('index') }}">Bid desk · SBU-2</a>
+  <a class="tab {{ 'active' if active == 'overview' }}" href="{{ url_for('index') }}">Overview</a>
+  <a class="tab {{ 'active' if active == 'shortlists' }}" href="{{ url_for('list_shortlists') }}">Shortlists</a>
+  <a class="tab {{ 'active' if active == 'bids' }}" href="{{ url_for('list_bids') }}">Bids</a>
+  <span class="spacer"></span>
+  <a class="btn small" href="{{ url_for('new_bid') }}">+ New bid</a>
+</nav>
+{% block crumbs %}{% endblock %}
 {% block content %}{% endblock %}
 </main>
 </body>

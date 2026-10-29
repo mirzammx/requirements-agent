@@ -1,0 +1,29 @@
+{% macro provider_select(selected=None) %}
+<label>AI model</label>
+<select name="provider">
+  {% for p in providers %}<option value="{{ p }}" {% if p == (selected or default_provider) %}selected{% endif %}>{{ 'Claude (paid)' if p == 'claude' else 'Gemini (free tier, testing only)' }}</option>{% endfor %}
+</select>
+{% endmacro %}
+
+{% macro crumbs(items) %}
+<nav class="crumbs" aria-label="Breadcrumb">
+  {% for label, href in items %}{% if href %}<a href="{{ href }}">{{ label }}</a>{% else %}<span aria-current="page">{{ label }}</span>{% endif %}{% if not loop.last %}<span class="sep">›</span>{% endif %}{% endfor %}
+</nav>
+{% endmacro %}
+
+{% macro bid_badge(s) %}
+{% if s.status.state == 'running' %}<span class="state running">{{ s.status.step }} running</span>
+{% elif s.status.state == 'failed' %}<span class="state failed">{{ s.status.step }} failed</span>
+{% elif s.decision %}<span class="state {{ s.decision|lower }}">{{ s.decision }}</span>{% endif %}
+{% if s.has_files %}<span class="state done">pack ready</span>{% elif s.can_draft and not s.decision %}<span class="state">card ready</span>{% endif %}
+{% endmacro %}
+
+{% macro screen_form(compact=False) %}
+<form method="post" action="{{ url_for('create_shortlist') }}" enctype="multipart/form-data">
+  <div class="row">
+    <div><label>BidAssist "Tender List" .xlsx files</label><input type="file" name="files" accept=".xlsx" multiple></div>
+    <div>{{ provider_select() }}</div>
+    <div style="flex:0"><button class="btn" type="submit">Screen</button></div>
+  </div>
+</form>
+{% endmacro %}

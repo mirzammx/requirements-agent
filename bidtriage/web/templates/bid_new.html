@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_macros.html" import crumbs, provider_select %}
+{% block title %}New bid{% endblock %}
+{% block crumbs %}
+{% if tender %}{{ crumbs([("Overview", url_for('index')), ("Shortlists", url_for('list_shortlists')), ("Shortlist " ~ run_meta.created, url_for('show_shortlist', run_id=run_id)), ("New bid", None)]) }}
+{% else %}{{ crumbs([("Overview", url_for('index')), ("Bids", url_for('list_bids')), ("New bid", None)]) }}{% endif %}
+{% endblock %}
+{% block content %}
+{% if error %}<div class="notice failed">{{ error }}</div>{% endif %}
+<section class="card">
+  <h2>New bid</h2>
+  {% if tender %}
+  <div class="notice info">Starting from the shortlist tender <strong>{{ tender.summary }}</strong> ({{ tender.authority }}, {{ tender|closes }}). Upload the RFQ documents BD fetched.</div>
+  {% endif %}
+  <p class="meta" style="margin-top:0">Upload the bid email saved from Outlook (.msg), or the RFQ PDFs and sheets with the email text below. Triage starts as soon as you submit; the card appears on the bid page.</p>
+  <form method="post" action="{{ url_for('create_bid') }}" enctype="multipart/form-data">
+    {% if tender %}<input type="hidden" name="shortlist" value="{{ run_id }}"><input type="hidden" name="tender" value="{{ tender.tender_id }}">{% endif %}
+    <label for="files">Bid documents (.msg, .eml, .pdf, .xlsx, .csv)</label>
+    <input id="files" type="file" name="files" multiple>
+    <label for="subject">Subject</label>
+    <input id="subject" type="text" name="subject" value="{{ form.subject or '' }}" placeholder="e.g. AHRU Power Supply Requirement - HAL Hyderabad">
+    <label for="body">Email text (optional)</label>
+    <textarea id="body" name="body" placeholder="Paste the BD email here if you uploaded PDFs instead of the .msg">{{ form.body or '' }}</textarea>
+    {% if samples and not tender %}
+    <div class="or">or</div>
+    <label for="sample">Use a folder from samples/</label>
+    <select id="sample" name="sample"><option value="">(none)</option>{% for s in samples %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select>
+    {% endif %}
+    <div class="row">
+      <div>{{ provider_select() }}</div>
+      <div style="flex:0"><button class="btn" type="submit">Run triage</button></div>
+    </div>
+  </form>
+</section>
+{% endblock %}

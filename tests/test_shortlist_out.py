@@ -43,7 +43,7 @@ def test_tracker_has_decision_dropdown():
     assert "Decision" in headers and "Reason" in headers
     assert ws.cell(2, headers.index("Tender Id") + 1).value == "SOON"
     dv = ws.data_validations.dataValidation[0]
-    assert dv.formula1 == '"Go,No-go,Ask"'
+    assert dv.formula1 == '"Fetch,Skip"'
 
 
 def test_cli_writes_outputs(tmp_path, monkeypatch):

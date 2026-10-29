@@ -82,8 +82,8 @@ def _new_bid(client, **data):
 def test_dashboard_renders(env):
     client, _ = env
     html = client.get("/").get_data(as_text=True)
-    assert "Screen BidAssist exports" in html and "New bid" in html
-    assert "ahru-hal-hyd" in html
+    assert "Needs action" in html and "Screen BidAssist exports" in html
+    assert "ahru-hal-hyd" in client.get("/bids/new").get_data(as_text=True)
 
 
 def test_upload_bid_runs_triage_and_shows_card(env):
@@ -181,14 +181,14 @@ def test_shortlist_upload_and_decide(env):
     assert resp.status_code == 302
     url = resp.headers["Location"]
     html = client.get(url).get_data(as_text=True)
-    assert "Variable SMPS" in html and "Go" in html and "Civil works" in html
-    assert client.post(url + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Go"}).status_code == 302
+    assert "Variable SMPS" in html and "Fetch documents" in html and "Civil works" in html
+    assert client.post(url + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Fetch"}).status_code == 302
     run_dir = next((data / "shortlists").iterdir())
-    assert json.loads((run_dir / "decisions.json").read_text())["GEM/2026/B/8082649"] == "Go"
+    assert json.loads((run_dir / "decisions.json").read_text())["GEM/2026/B/8082649"] == "Fetch"
     ws = openpyxl.load_workbook(run_dir / "result" / "shortlist.xlsx").active
     headers = [c.value for c in ws[1]]
     row = next(r for r in ws.iter_rows(min_row=2) if r[headers.index("Tender Id")].value == "GEM/2026/B/8082649")
-    assert row[headers.index("Decision")].value == "Go"
+    assert row[headers.index("Decision")].value == "Fetch"
 
 
 def test_decide_unknown_tender_400(env):
@@ -196,7 +196,7 @@ def test_decide_unknown_tender_400(env):
     resp = client.post("/shortlists", data={"provider": "gemini", "files": [(io.BytesIO(b"PK"), "a.xlsx")]},
                        content_type="multipart/form-data")
     url = resp.headers["Location"]
-    assert client.post(url + "/decide", data={"tender_id": "NOPE", "decision": "Go"}).status_code == 400
+    assert client.post(url + "/decide", data={"tender_id": "NOPE", "decision": "Fetch"}).status_code == 400
     assert client.post(url + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Maybe"}
                        ).status_code == 400
 
@@ -284,6 +284,88 @@ def test_decide_survives_corrupt_xlsx(env):
     url = resp.headers["Location"]
     run_dir = next((data / "shortlists").iterdir())
     (run_dir / "result" / "shortlist.xlsx").write_bytes(b"not a workbook")
-    r = client.post(url + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Ask"})
+    r = client.post(url + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Skip"})
     assert r.status_code == 302 and "msg=" in r.headers["Location"]
-    assert json.loads((run_dir / "decisions.json").read_text())["GEM/2026/B/8082649"] == "Ask"
+    assert json.loads((run_dir / "decisions.json").read_text())["GEM/2026/B/8082649"] == "Skip"
+
+def _shortlist_with_candidate(client):
+    resp = client.post("/shortlists", data={"provider": "gemini", "files": [(io.BytesIO(b"PK"), "a.xlsx")]},
+                       content_type="multipart/form-data")
+    return resp.headers["Location"]
+
+
+def test_every_page_has_the_main_menu(env):
+    client, _ = env
+    sl = _shortlist_with_candidate(client)
+    bid = _new_bid(client)
+    for url in ("/", "/shortlists", "/bids", "/bids/new", sl, bid):
+        html = client.get(url).get_data(as_text=True)
+        for target in ('href="/"', 'href="/shortlists"', 'href="/bids"', 'href="/bids/new"'):
+            assert target in html, (url, target)
+
+
+def test_breadcrumbs_show_where_you_are(env):
+    client, _ = env
+    sl = _shortlist_with_candidate(client)
+    html = client.get(sl).get_data(as_text=True)
+    assert 'aria-label="Breadcrumb"' in html and 'href="/shortlists">Shortlists' in html
+
+
+def test_fetch_then_start_bid_links_tender_and_bid_both_ways(env):
+    client, data = env
+    sl = _shortlist_with_candidate(client)
+    client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Fetch"})
+    page = client.get(sl).get_data(as_text=True)
+    assert "Start bid" in page and "tender=GEM" in page
+    run_id = sl.rstrip("/").split("/")[-1]
+    form = client.get(f"/bids/new?shortlist={run_id}&tender=GEM/2026/B/8082649").get_data(as_text=True)
+    assert 'value="Variable SMPS' in form and 'name="tender"' in form
+    url = _new_bid(client, subject="Variable SMPS", shortlist=run_id, tender="GEM/2026/B/8082649")
+    bid_page = client.get(url).get_data(as_text=True)
+    assert f'href="/shortlists/{run_id}' in bid_page
+    assert "Open bid" in client.get(sl).get_data(as_text=True)
+
+
+def test_skipped_candidate_has_no_start_bid(env):
+    client, _ = env
+    sl = _shortlist_with_candidate(client)
+    client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Skip"})
+    assert "tender=GEM" not in client.get(sl).get_data(as_text=True)
+
+
+def test_overview_lists_what_needs_action(env):
+    client, _ = env
+    sl = _shortlist_with_candidate(client)
+    html = client.get("/").get_data(as_text=True)
+    assert "Variable SMPS" in html and "Fetch documents or skip" in html
+    client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Fetch"})
+    html = client.get("/").get_data(as_text=True)
+    assert "Start the bid" in html
+    _new_bid(client, subject="HAL AHRU card")
+    html = client.get("/").get_data(as_text=True)
+    assert "HAL AHRU card" in html and "Go / No-go on the card" in html
+
+
+def test_bid_decision_on_card(env):
+    client, data = env
+    url = _new_bid(client)
+    html = client.get(url).get_data(as_text=True)
+    assert "Go / No-go" in html and 'class="step current"' in html
+    assert client.post(url + "/decide", data={"decision": "Go"}).status_code == 302
+    html = client.get(url).get_data(as_text=True)
+    assert "Decision: Go" in html
+    assert client.post(url + "/decide", data={"decision": "Maybe"}).status_code == 400
+    bid_dir = next((data / "bids").iterdir())
+    assert json.loads((bid_dir / "decision.json").read_text())["decision"] == "Go"
+
+
+def test_bid_stepper_points_to_next_action(env):
+    client, _ = env
+    url = _new_bid(client)
+    html = client.get(url).get_data(as_text=True)
+    assert html.index('class="step done"') < html.index('class="step current"')
+    assert "Decide on the card" in html
+    client.post(url + "/decide", data={"decision": "Go"})
+    client.post(url + "/draft", data={"provider": "gemini"})
+    html = client.get(url).get_data(as_text=True)
+    assert "Download the pack" in html
