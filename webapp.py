@@ -18,13 +18,18 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, abort, redirect, render_template, request, send_file, send_from_directory, url_for
+from flask import (Flask, abort, jsonify, redirect, render_template, request, send_file, send_from_directory,
+                   url_for)
 from werkzeug.utils import secure_filename
 
 import draft
 import shortlist
 import triage
+from bidtriage.email_loader import load_bid
+from bidtriage.intake import classify_mail, load_intake_settings
 from bidtriage.render import CSS
+from bidtriage.reply import build_reply
+from bidtriage.schema import BidAssessment
 from bidtriage.shortlist_out import EXTRA_CSS
 from bidtriage.web import jobs
 
@@ -79,10 +84,13 @@ def _days_key(item: dict):
 
 
 def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "samples", sync_jobs: bool = False,
-               allowed_hosts: set[str] = frozenset({"localhost:8010", "127.0.0.1:8010"})):
+               allowed_hosts: set[str] = frozenset({"localhost:8010", "127.0.0.1:8010"}),
+               intake_settings: dict | None = None):
     app = Flask(__name__, template_folder=str(ROOT / "bidtriage" / "web" / "templates"))
     app.config.update(MAX_CONTENT_LENGTH=50 * 1024 * 1024, SYNC_JOBS=sync_jobs)
-    bids_dir, lists_dir = Path(data_dir) / "bids", Path(data_dir) / "shortlists"
+    data_dir = Path(data_dir)
+    bids_dir, lists_dir = data_dir / "bids", data_dir / "shortlists"
+    settings = intake_settings or load_intake_settings()
     for d in (bids_dir, lists_dir):
         if d.is_dir():
             jobs.recover([p for p in d.iterdir() if p.is_dir()])
@@ -138,7 +146,9 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
             "files": files,
             "has_files": any(f["exists"] for f in files),
             "has_saved_draft": (response / "draft.json").is_file(),
+            "mail": meta.get("mail"),
         }
+        state["reply"] = _reply_state(bid, state)
         state["steps"], state["next_action"] = _bid_steps(state)
         return state
 
@@ -203,6 +213,14 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
             elif s["decision"] == "Go" and not s["has_files"]:
                 actions.append({"who": "BD", "what": "Generate the response", "title": m["title"],
                                 "detail": "Decision: Go", "href": href + "#response", "button": "Open bid"})
+            elif s["reply"]["state"] == "due":
+                actions.append({"who": "You", "what": "Reply to BD is ready to draft", "title": m["title"],
+                                "detail": "Start the mail watcher (mailwatch.ps1) so it lands in your Outlook Drafts",
+                                "href": href + "#decide", "button": "Open bid"})
+            elif s["reply"]["state"] == "drafted" and _within_days(s["reply"].get("drafted_at", ""), 3):
+                actions.append({"who": "You", "what": "Check and send the reply from Outlook Drafts",
+                                "title": m["title"], "detail": f"Drafted {s['reply']['drafted_at']} "
+                                f"({s['reply']['decision']})", "href": href + "#decide", "button": "Open bid"})
         return actions
 
     def provider_arg() -> str:
@@ -281,18 +299,123 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         if typed and not (inp / "email.txt").exists():
             (inp / "email.txt").write_text(f"Subject: {subject}\n\n{body}\n", encoding="utf-8")
 
-        # The folder loader handles one email file plus extra documents, or documents plus email.txt.
-        bid_input = inp
         title = subject or sample or (files[0].filename if files else bid_id)
-        meta = {"id": bid_id, "title": title, "created": f"{datetime.now():%Y-%m-%d %H:%M}", "provider": provider,
-                "input": str(bid_input.relative_to(bid))}
+        extra = {}
         if run_id:
-            meta["source"] = {"shortlist": run_id, "tender_id": tender_id,
-                              "shortlist_created": _read_json(lists_dir / run_id / "meta.json", {}).get("created", "")}
+            extra["source"] = {"shortlist": run_id, "tender_id": tender_id,
+                               "shortlist_created": _read_json(lists_dir / run_id / "meta.json", {}).get("created", "")}
+        start_bid(bid, provider, title, extra)
+        return redirect(url_for("show_bid", bid_id=bid_id))
+
+    def start_bid(bid: Path, provider: str, title: str, extra: dict) -> None:
+        """Write meta.json and start triage on bid/input (one email file plus documents, or documents)."""
+        bid_input = bid / "input"
+        meta = {"id": bid.name, "title": title, "created": f"{datetime.now():%Y-%m-%d %H:%M}", "provider": provider,
+                "input": "input", **extra}
         (bid / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         jobs.start(bid, "triage", lambda: triage.run_triage(bid_input, provider=provider, out_dir=bid / "card"),
                    sync=app.config["SYNC_JOBS"])
-        return redirect(url_for("show_bid", bid_id=bid_id))
+
+    def start_shortlist(run: Path, paths: list[Path], provider: str, title: str, extra: dict) -> None:
+        meta = {"id": run.name, "title": title, "created": f"{datetime.now():%Y-%m-%d %H:%M}", "provider": provider,
+                **extra}
+        (run / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        jobs.start(run, "shortlist",
+                   lambda: shortlist.run_shortlist(paths, provider=provider, out_dir=run / "result"),
+                   sync=app.config["SYNC_JOBS"])
+
+    # ---------------------------------------------------------------- mail watcher API
+
+    @app.post("/api/intake")
+    def api_intake():
+        """The watcher posts each new mail from the Outlook "Bid desk" folder here, once per EntryID."""
+        upload = request.files.get("file")
+        entry_id = request.form.get("entry_id", "").strip()
+        if not upload or not entry_id or Path(upload.filename or "").suffix.lower() not in EMAIL_SUFFIXES:
+            abort(400)
+        with INTAKE_LOCK:
+            log = _read_json(data_dir / "intake.json", {})
+            if entry_id in log:
+                return jsonify(log[entry_id])
+            provider = _default_provider()
+            item_id = _new_id()
+            staging = data_dir / "intake" / item_id
+            staging.mkdir(parents=True)
+            mail_path = staging / _unique_name(upload.filename, set())
+            upload.save(mail_path)
+            try:
+                mail = load_bid(mail_path)
+            except Exception as exc:
+                shutil.rmtree(staging, ignore_errors=True)
+                return jsonify({"error": f"could not read the mail: {exc}"}), 400
+            mail_meta = {"entry_id": entry_id, "subject": mail.subject, "sender": mail.sender,
+                         "received": request.form.get("received", "") or mail.date}
+            kind, screen, ignored = classify_mail(mail, settings)
+            if kind == "bid":
+                bid = bids_dir / item_id
+                (bid / "input").mkdir(parents=True)
+                shutil.move(str(mail_path), bid / "input" / mail_path.name)
+                shutil.rmtree(staging, ignore_errors=True)
+                result = {"kind": "bid", "bid_id": item_id}
+                log[entry_id] = result
+                _atomic_write_text(data_dir / "intake.json", json.dumps(log, indent=2))
+                start_bid(bid, provider, mail.subject or mail_path.stem, {"mail": mail_meta})
+            elif screen:
+                run = lists_dir / item_id
+                (run / "input").mkdir(parents=True)
+                paths, taken = [], set()
+                for a in screen:
+                    name = _unique_name(a.filename, taken)
+                    taken.add(name)
+                    (run / "input" / name).write_bytes(a.data)
+                    paths.append(run / "input" / name)
+                shutil.rmtree(staging, ignore_errors=True)
+                result = {"kind": "bidassist", "shortlist_id": item_id, "ignored": ignored}
+                log[entry_id] = result
+                _atomic_write_text(data_dir / "intake.json", json.dumps(log, indent=2))
+                start_shortlist(run, paths, provider, ", ".join(a.filename for a in screen), {"mail": mail_meta})
+            else:
+                shutil.rmtree(staging, ignore_errors=True)
+                result = {"kind": "ignored", "ignored": ignored,
+                          "reason": f"no BidAssist alert listed in screen_alerts {settings['screen_alerts']}"}
+                log[entry_id] = result
+                _atomic_write_text(data_dir / "intake.json", json.dumps(log, indent=2))
+        return jsonify(result)
+
+    @app.get("/api/replies")
+    def api_replies():
+        """Replies the watcher should draft in Outlook now (never sent automatically)."""
+        due = []
+        for s in all_bids():
+            if s["reply"]["state"] != "due":
+                continue
+            bid = bids_dir / s["meta"]["id"]
+            try:
+                assessment = BidAssessment.model_validate_json(
+                    (bid / "card" / "assessment.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            attachments, placeholders = [], None
+            if s["decision"] == "Go":
+                placeholders = sum(f["count"] or 0 for f in s["files"] if f["name"].endswith(".docx"))
+                zip_path = _write_pack_zip(bid, s["meta"].get("title", bid.name), response_files(bid))
+                attachments.append(zip_path.relative_to(data_dir).as_posix())
+            reply = build_reply(assessment, s["decision"], pack_placeholders=placeholders,
+                                signature=settings["signature"])
+            due.append({"bid_id": bid.name, "entry_id": s["mail"]["entry_id"], "decision": s["decision"],
+                        "html": reply["html"], "text": reply["text"], "cc": settings["mahadevan_email"],
+                        "attachments": attachments})
+        return jsonify(due)
+
+    @app.post("/api/replies/<bid_id>/drafted")
+    def api_reply_drafted(bid_id):
+        bid = folder(bids_dir, bid_id)
+        decision = _read_json(bid / "decision.json", {}).get("decision", "")
+        if not decision:
+            abort(400)
+        _atomic_write_text(bid / "reply.json", json.dumps(
+            {"decision": decision, "drafted_at": f"{datetime.now():%Y-%m-%d %H:%M}"}, indent=2))
+        return jsonify({"ok": True})
 
     @app.get("/bids/<bid_id>")
     def show_bid(bid_id):
@@ -318,6 +441,13 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         with DECISION_LOCK:
             _atomic_write_text(bid / "decision.json", json.dumps(
                 {"decision": decision, "at": f"{datetime.now():%Y-%m-%d %H:%M}"}, indent=2))
+        if decision == "Go" and not response_files(bid):
+            # Go means BD needs the response pack: start it now; the reply waits for it.
+            meta = _read_json(bid / "meta.json", {})
+            bid_input = bid / meta.get("input", "input")
+            provider = meta.get("provider") or _default_provider()
+            jobs.start(bid, "draft", lambda: draft.run_draft(bid_input, bid / "card", provider=provider),
+                       sync=app.config["SYNC_JOBS"])
         return redirect(url_for("show_bid", bid_id=bid_id) + ("#response" if decision == "Go" else "#decide"))
 
     @app.post("/bids/<bid_id>/triage")
@@ -482,6 +612,41 @@ def _bid_steps(s: dict) -> tuple[list[dict], dict]:
     else:
         nxt = {"text": "Waiting for the triage card.", "href": "", "button": ""}
     return steps, nxt
+
+
+def _reply_state(bid: Path, s: dict) -> dict:
+    """n/a (bid not from mail) · none (no decision) · waiting (Go, pack not ready) · due · drafted."""
+    if not s.get("mail"):
+        return {"state": "n/a"}
+    if not s["decision"]:
+        return {"state": "none"}
+    drafted = _read_json(bid / "reply.json", {})
+    if drafted.get("decision") == s["decision"]:
+        return {"state": "drafted", **drafted}
+    if s["decision"] == "Go" and (not s["has_files"] or s["status"].get("state") == "running"):
+        return {"state": "waiting"}
+    return {"state": "due"}
+
+
+def _write_pack_zip(bid: Path, title: str, names: list[str]) -> Path:
+    response = bid / "card" / "response"
+    path = response / f"{secure_filename(title) or bid.name}_response.zip"
+    tmp = path.with_suffix(".zip.tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for n in names:
+            z.write(response / n, n)
+    os.replace(tmp, path)
+    return path
+
+
+def _within_days(stamp: str, days: int) -> bool:
+    try:
+        return (datetime.now() - datetime.strptime(stamp, "%Y-%m-%d %H:%M")).days < days
+    except ValueError:
+        return False
+
+
+INTAKE_LOCK = threading.Lock()
 
 
 def _anchor(tender_id: str) -> str:

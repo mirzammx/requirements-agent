@@ -369,3 +369,146 @@ def test_bid_stepper_points_to_next_action(env):
     client.post(url + "/draft", data={"provider": "gemini"})
     html = client.get(url).get_data(as_text=True)
     assert "Download the pack" in html
+
+# ---------------------------------------------------------------- mail intake + replies
+
+SETTINGS = {"screen_alerts": ["Power supply"], "mahadevan_email": "m@rugrel.com", "signature": "On behalf of M"}
+
+
+def _mail(subject, attachments):
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = "BD <bd@rugrel.com>"
+    msg["Date"] = "Wed, 07 Oct 2026 18:06:00 +0530"
+    msg.set_content("Please check the feasibility.")
+    for name, data in attachments:
+        msg.add_attachment(data, maintype="application", subtype="octet-stream", filename=name)
+    return msg.as_bytes()
+
+
+@pytest.fixture
+def mail_env(tmp_path, monkeypatch):
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    monkeypatch.setattr(triage, "run_triage", fake_triage)
+    monkeypatch.setattr(draft, "run_draft", fake_draft)
+    monkeypatch.setattr(shortlist, "run_shortlist", fake_shortlist)
+    app = webapp.create_app(data_dir=tmp_path / "data", samples_dir=samples, sync_jobs=True,
+                            allowed_hosts={"localhost"}, intake_settings=SETTINGS)
+    return app.test_client(), tmp_path / "data"
+
+
+def _intake(client, eml, entry_id="E1", name="mail.eml"):
+    return client.post("/api/intake", data={"entry_id": entry_id, "file": (io.BytesIO(eml), name)},
+                       content_type="multipart/form-data")
+
+
+def test_intake_bid_mail_creates_bid_and_runs_triage(mail_env):
+    client, data = mail_env
+    r = _intake(client, _mail("AHRU Power Supply Requirement", [("RFQ.pdf", b"%PDF-1.4")]))
+    assert r.status_code == 200 and r.json["kind"] == "bid"
+    bid_id = r.json["bid_id"]
+    meta = json.loads((data / "bids" / bid_id / "meta.json").read_text())
+    assert meta["mail"]["entry_id"] == "E1" and meta["title"] == "AHRU Power Supply Requirement"
+    html = client.get(f"/bids/{bid_id}").get_data(as_text=True)
+    assert "From your mail" in html and "Generate response" in html
+
+
+def test_repeat_entry_id_is_idempotent(mail_env):
+    client, data = mail_env
+    eml = _mail("AHRU", [("RFQ.pdf", b"%PDF")])
+    first, second = _intake(client, eml).json, _intake(client, eml).json
+    assert first["bid_id"] == second["bid_id"]
+    assert len(list((data / "bids").iterdir())) == 1
+
+
+def test_intake_bidassist_screens_only_power_supply(mail_env, monkeypatch):
+    client, data = mail_env
+    seen = {}
+
+    def capture(paths, **kwargs):
+        seen["names"] = [p.name for p in paths]
+        return fake_shortlist(paths, **kwargs)
+
+    monkeypatch.setattr(shortlist, "run_shortlist", capture)
+    r = _intake(client, _mail("BidAssist alert", [("Power supply-Tender List_26102026.xlsx", b"PK"),
+                                                  ("My Preference-Tender List_26102026.xlsx", b"PK")]))
+    assert r.json["kind"] == "bidassist"
+    assert seen["names"] == ["Power_supply-Tender_List_26102026.xlsx"]
+    assert r.json["ignored"] == ["My Preference-Tender List_26102026.xlsx"]
+    assert client.get(f"/shortlists/{r.json['shortlist_id']}").status_code == 200
+
+
+def test_intake_bidassist_without_power_supply_is_ignored(mail_env):
+    client, data = mail_env
+    r = _intake(client, _mail("BidAssist alert", [("My Preference-Tender List_26102026.xlsx", b"PK")]))
+    assert r.status_code == 200 and r.json["kind"] == "ignored"
+    assert not (data / "shortlists").exists() or not any((data / "shortlists").iterdir())
+
+
+def test_intake_rejects_non_mail(mail_env):
+    client, _ = mail_env
+    r = client.post("/api/intake", data={"entry_id": "E9", "file": (io.BytesIO(b"%PDF"), "x.pdf")},
+                    content_type="multipart/form-data")
+    assert r.status_code == 400
+
+
+def _mail_bid(client):
+    return _intake(client, _mail("AHRU Power Supply Requirement", [("RFQ.pdf", b"%PDF-1.4")])).json["bid_id"]
+
+
+def test_go_auto_generates_pack_then_reply_due(mail_env):
+    client, data = mail_env
+    bid_id = _mail_bid(client)
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "Go"})
+    replies = client.get("/api/replies").json
+    assert len(replies) == 1
+    r = replies[0]
+    assert r["bid_id"] == bid_id and r["entry_id"] == "E1" and r["decision"] == "Go" and r["cc"] == "m@rugrel.com"
+    assert "Feasible" in r["html"] and "On behalf of M" in r["html"]
+    (zip_rel,) = r["attachments"]
+    assert zip_rel.endswith("_response.zip") and (data / zip_rel).is_file()
+
+
+def test_go_reply_waits_for_pack(mail_env, monkeypatch):
+    client, _ = mail_env
+    bid_id = _mail_bid(client)
+
+    def fail(*a, **k):
+        raise AnalysisError("Gemini API error 503")
+
+    monkeypatch.setattr(draft, "run_draft", fail)
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "Go"})
+    assert client.get("/api/replies").json == []
+    assert "Gemini API error 503" in client.get(f"/bids/{bid_id}").get_data(as_text=True)
+
+
+def test_no_go_reply_due_then_marked_drafted(mail_env):
+    client, _ = mail_env
+    bid_id = _mail_bid(client)
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "No-go"})
+    (r,) = client.get("/api/replies").json
+    assert r["decision"] == "No-go" and r["attachments"] == [] and "Not feasible" in r["html"]
+    assert client.post(f"/api/replies/{bid_id}/drafted").status_code == 200
+    assert client.get("/api/replies").json == []
+    assert "Reply drafted" in client.get(f"/bids/{bid_id}").get_data(as_text=True)
+    assert "send the reply" in client.get("/").get_data(as_text=True)
+
+
+def test_changed_decision_redue_reply(mail_env):
+    client, _ = mail_env
+    bid_id = _mail_bid(client)
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "No-go"})
+    client.post(f"/api/replies/{bid_id}/drafted")
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "Ask"})
+    (r,) = client.get("/api/replies").json
+    assert r["decision"] == "Ask"
+
+
+def test_manual_bid_has_no_reply(mail_env):
+    client, _ = mail_env
+    url = _new_bid(client)
+    client.post(url + "/decide", data={"decision": "No-go"})
+    assert client.get("/api/replies").json == []

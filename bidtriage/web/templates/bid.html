@@ -10,6 +10,7 @@
 <section class="card">
   <div class="eyebrow">Bid</div>
   <h1>{{ meta.title }}</h1>
+  {% if mail %}<p class="meta" style="margin:0">From your mail of {{ mail.received }}: “{{ mail.subject }}” ({{ mail.sender }})</p>{% endif %}
   <p class="meta" style="margin:0 0 14px">Created {{ meta.created }}{% if meta.source %} · from the <a href="{{ url_for('show_shortlist', run_id=meta.source.shortlist) }}#{{ meta.source.tender_id|anchor }}">BidAssist shortlist of {{ meta.source.shortlist_created }}</a>{% endif %}</p>
   <ol class="steps" aria-label="Progress">
     {% for st in steps %}<li class="step {{ st.state }}"{% if st.state == 'current' %} aria-current="step"{% endif %}>{{ st.label }}</li>{% endfor %}
@@ -48,6 +49,10 @@
     {% endfor %}
     {% if decision == 'Ask' %}<span class="meta">Ask BD or the buyer the open questions on the card, then decide again.</span>{% endif %}
   </div>
+  {% if reply.state == 'waiting' %}<p class="meta">Reply to BD: waiting for the response pack, then it is drafted in your Outlook with the pack attached.</p>
+  {% elif reply.state == 'due' %}<p class="meta">Reply to BD: ready. The mail watcher will put it in your Outlook Drafts (start <code>mailwatch.ps1</code> if it is not running).</p>
+  {% elif reply.state == 'drafted' %}<p><span class="state done">Reply drafted</span> <span class="meta">in your Outlook Drafts on {{ reply.drafted_at }} ({{ reply.decision }}). Check it and press Send.</span></p>
+  {% elif reply.state == 'none' and mail %}<p class="meta">After the decision, a reply to BD is drafted in your Outlook (never sent automatically).</p>{% endif %}
 </section>
 
 <section class="card" id="response">
