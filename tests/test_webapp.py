@@ -491,7 +491,7 @@ def test_no_go_reply_due_then_marked_drafted(mail_env):
     client.post(f"/bids/{bid_id}/decide", data={"decision": "No-go"})
     (r,) = client.get("/api/replies").json
     assert r["decision"] == "No-go" and r["attachments"] == [] and "Not feasible" in r["html"]
-    assert client.post(f"/api/replies/{bid_id}/drafted").status_code == 200
+    assert client.post(f"/api/replies/{bid_id}/drafted", data={"decision": "No-go"}).status_code == 200
     assert client.get("/api/replies").json == []
     assert "Reply drafted" in client.get(f"/bids/{bid_id}").get_data(as_text=True)
     assert "send the reply" in client.get("/").get_data(as_text=True)
@@ -501,7 +501,7 @@ def test_changed_decision_redue_reply(mail_env):
     client, _ = mail_env
     bid_id = _mail_bid(client)
     client.post(f"/bids/{bid_id}/decide", data={"decision": "No-go"})
-    client.post(f"/api/replies/{bid_id}/drafted")
+    client.post(f"/api/replies/{bid_id}/drafted", data={"decision": "No-go"})
     client.post(f"/bids/{bid_id}/decide", data={"decision": "Ask"})
     (r,) = client.get("/api/replies").json
     assert r["decision"] == "Ask"
@@ -512,3 +512,36 @@ def test_manual_bid_has_no_reply(mail_env):
     url = _new_bid(client)
     client.post(url + "/decide", data={"decision": "No-go"})
     assert client.get("/api/replies").json == []
+
+def test_drafted_for_an_outdated_decision_is_rejected(mail_env):
+    client, data = mail_env
+    bid_id = _mail_bid(client)
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "No-go"})
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "Ask"})        # changed while the draft was made
+    r = client.post(f"/api/replies/{bid_id}/drafted", data={"decision": "No-go"})
+    assert r.status_code == 409
+    assert not (data / "bids" / bid_id / "reply.json").exists()
+    (due,) = client.get("/api/replies").json
+    assert due["decision"] == "Ask"
+
+
+def test_go_after_retriage_regenerates_stale_pack(mail_env, monkeypatch):
+    import os
+    import time
+
+    client, data = mail_env
+    bid_id = _mail_bid(client)
+    calls = []
+
+    def counting_draft(path, card_dir, **kwargs):
+        calls.append(1)
+        return fake_draft(path, card_dir, **kwargs)
+
+    monkeypatch.setattr(draft, "run_draft", counting_draft)
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "Go"})
+    assert len(calls) == 1
+    summary = data / "bids" / bid_id / "card" / "response" / "summary.json"
+    old = time.time() - 3600
+    os.utime(summary, (old, old))                                          # pack older than the card now
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "Go"})
+    assert len(calls) == 2

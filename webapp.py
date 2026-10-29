@@ -148,6 +148,7 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
             "has_saved_draft": (response / "draft.json").is_file(),
             "mail": meta.get("mail"),
         }
+        state["pack_current"] = state["has_files"] and _pack_is_current(bid)
         state["reply"] = _reply_state(bid, state)
         state["steps"], state["next_action"] = _bid_steps(state)
         return state
@@ -410,11 +411,17 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
     @app.post("/api/replies/<bid_id>/drafted")
     def api_reply_drafted(bid_id):
         bid = folder(bids_dir, bid_id)
-        decision = _read_json(bid / "decision.json", {}).get("decision", "")
-        if not decision:
-            abort(400)
-        _atomic_write_text(bid / "reply.json", json.dumps(
-            {"decision": decision, "drafted_at": f"{datetime.now():%Y-%m-%d %H:%M}"}, indent=2))
+        drafted = request.form.get("decision", "")
+        with DECISION_LOCK:
+            current = _read_json(bid / "decision.json", {}).get("decision", "")
+            if not current or drafted not in BID_DECISIONS:
+                abort(400)
+            if drafted != current:
+                # Mahadevan changed his mind while the draft was being made: the saved draft is outdated.
+                return jsonify({"ok": False, "current": current,
+                                "error": f"decision is now {current}; delete the {drafted} draft"}), 409
+            _atomic_write_text(bid / "reply.json", json.dumps(
+                {"decision": drafted, "drafted_at": f"{datetime.now():%Y-%m-%d %H:%M}"}, indent=2))
         return jsonify({"ok": True})
 
     @app.get("/bids/<bid_id>")
@@ -441,8 +448,9 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         with DECISION_LOCK:
             _atomic_write_text(bid / "decision.json", json.dumps(
                 {"decision": decision, "at": f"{datetime.now():%Y-%m-%d %H:%M}"}, indent=2))
-        if decision == "Go" and not response_files(bid):
-            # Go means BD needs the response pack: start it now; the reply waits for it.
+        if decision == "Go" and not (response_files(bid) and _pack_is_current(bid)):
+            # Go means BD needs the response pack (a fresh one if the card changed): start it now;
+            # the reply waits for it.
             meta = _read_json(bid / "meta.json", {})
             bid_input = bid / meta.get("input", "input")
             provider = meta.get("provider") or _default_provider()
@@ -623,9 +631,18 @@ def _reply_state(bid: Path, s: dict) -> dict:
     drafted = _read_json(bid / "reply.json", {})
     if drafted.get("decision") == s["decision"]:
         return {"state": "drafted", **drafted}
-    if s["decision"] == "Go" and (not s["has_files"] or s["status"].get("state") == "running"):
+    if s["decision"] == "Go" and (not s["pack_current"] or s["status"].get("state") == "running"):
         return {"state": "waiting"}
     return {"state": "due"}
+
+
+def _pack_is_current(bid: Path) -> bool:
+    """A response pack counts only if it was made from the current card (not before a re-triage)."""
+    summary, card = bid / "card" / "response" / "summary.json", bid / "card" / "assessment.json"
+    try:
+        return summary.stat().st_mtime >= card.stat().st_mtime
+    except OSError:
+        return False
 
 
 def _write_pack_zip(bid: Path, title: str, names: list[str]) -> Path:

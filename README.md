@@ -43,6 +43,8 @@ powershell -ExecutionPolicy Bypass -File .\mailwatch.ps1        # keep running; 
 - A bid mail becomes a bid and is triaged. A BidAssist alert is screened, but only its **Power supply** list (`prompts/intake.toml` › `screen_alerts`); "My Preference" is ignored for now.
 - After Mahadevan's Go / No-go / Ask on the card, the reply to BD is created as a **ReplyAll draft in your Outlook Drafts**, with Mahadevan in CC and the response pack attached on Go. It is never sent automatically.
 - Needs classic Outlook open and the web app running.
+- If you add an Outlook rule, make it match only new mails from BD or BidAssist (not "RE:" replies, and not mail from yourself), otherwise replies in the thread would each become a new bid and a new AI run.
+- Tests for the watcher's own logic: `powershell -ExecutionPolicy Bypass -File .\tests\test_mailwatch.ps1`.
 
 The same steps are also available as commands:
 

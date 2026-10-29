@@ -59,6 +59,26 @@ function Invoke-Api([string[]]$CurlArgs) {
     return @{ Code = [int]$code; Body = $body }
 }
 
+function ConvertTo-DueList([string]$Json) {
+    # Windows PowerShell 5.1 passes a JSON array down the pipeline as ONE object; assigning it to a
+    # variable first and wrapping it with @() gives one item per reply. The leading comma stops
+    # PowerShell unrolling the result on return.
+    $parsed = ConvertFrom-Json $Json
+    if ($null -eq $parsed) { return ,@() }
+    return ,@($parsed)
+}
+
+function Add-ReplyHtml([string]$Existing, [string]$Html) {
+    # Put our text right after <body ...>; if the reply has no <body> tag, put it in front.
+    # Plain string splicing (no regex replacement), so '$' in the text is kept as is.
+    $m = [regex]::Match($Existing, '<body[^>]*>', 'IgnoreCase')
+    if ($m.Success) {
+        $at = $m.Index + $m.Length
+        return $Existing.Substring(0, $at) + $Html + $Existing.Substring($at)
+    }
+    return $Html + $Existing
+}
+
 function Send-NewMail($folder) {
     $items = @()
     foreach ($item in $folder.Items) {
@@ -92,25 +112,36 @@ function Send-NewMail($folder) {
 function Write-ReplyDrafts($ns) {
     $r = Invoke-Api @("$AppUrl/api/replies")
     if ($r.Code -ne 200) { Log "Could not fetch replies (HTTP $($r.Code)). Is the app running?"; return }
-    $due = @($r.Body | ConvertFrom-Json)
+    $due = ConvertTo-DueList $r.Body
     foreach ($d in $due) {
-        if (-not $d) { continue }
+        $reply = $null
         try {
             $original = $ns.GetItemFromID($d.entry_id)
             $reply = $original.ReplyAll()
             $reply.CC = (@(("" + $reply.CC), $d.cc) | Where-Object { $_ }) -join "; "
-            $html = $d.html.Replace('$', '$$')
-            $reply.HTMLBody = [regex]::Replace($reply.HTMLBody, '(<body[^>]*>)', "`$1$html", 1)
+            $reply.HTMLBody = Add-ReplyHtml $reply.HTMLBody $d.html
+            $signature = (($d.text -split "`n") | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+            if (-not ("" + $reply.Body).Contains($signature)) {
+                throw "our reply text did not make it into the draft, so it was not saved"
+            }
             foreach ($a in $d.attachments) {
                 $file = Join-Path $DataDir ($a -replace '/', '\')
                 if (Test-Path $file) { $reply.Attachments.Add($file) | Out-Null }
-                else { Log "Attachment not found: $file" }
+                else { throw "attachment not found: $file" }
             }
             $reply.Save()   # Drafts only. Never Send().
-            $ack = Invoke-Api @("-X", "POST", "$AppUrl/api/replies/$($d.bid_id)/drafted")
-            Log "Reply drafted ($($d.decision)) for '$($original.Subject)'. Check your Drafts and press Send."
-            if ($ack.Code -ne 200) { Log "  (could not mark it drafted in the app: HTTP $($ack.Code))" }
+            $ack = Invoke-Api @("-X", "POST", "-F", "decision=$($d.decision)", "$AppUrl/api/replies/$($d.bid_id)/drafted")
+            if ($ack.Code -eq 409) {
+                # Mahadevan changed the decision while this draft was being made: remove our outdated draft.
+                $reply.Delete()
+                Log "Decision changed for '$($original.Subject)'; deleted the outdated $($d.decision) draft. The new reply follows."
+            } elseif ($ack.Code -ne 200) {
+                Log "Reply drafted for '$($original.Subject)', but the app could not record it (HTTP $($ack.Code))."
+            } else {
+                Log "Reply drafted ($($d.decision)) for '$($original.Subject)'. Check your Drafts and press Send."
+            }
         } catch {
+            if ($reply) { try { $reply.Close(1) } catch { } }   # olDiscard: drop the unsaved reply
             Log "Could not draft the reply for bid $($d.bid_id): $($_.Exception.Message)"
         }
     }
