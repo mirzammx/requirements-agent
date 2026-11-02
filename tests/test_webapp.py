@@ -606,6 +606,25 @@ def test_get_rfq_from_list_downloads_gem_document_in_one_click(env, monkeypatch)
     assert json.loads((bid_dir / "meta.json").read_text())["title"] == "Variable SMPS"
 
 
+def test_lists_saved_before_detail_urls_get_them_from_their_excel(env):
+    client, data = env
+    sl = _shortlist_with_candidate(client)
+    run_dir = next((data / "shortlists").iterdir())
+    saved = run_dir / "result" / "shortlist.json"
+    items = json.loads(saved.read_text())
+    for i in items:
+        del i["detail_url"]                                       # a list made by the older app
+    saved.write_text(json.dumps(items), encoding="utf-8")
+    wb = openpyxl.Workbook()
+    wb.active.append(["Tender Id", "Summary", "Tender Detail Url"])
+    wb.active.append(["GEM/2026/B/8082649", "Variable SMPS", "https://bidplus.gem.gov.in/bidding/bid/getBidResultView/9945635"])
+    for old in (run_dir / "input").iterdir():
+        old.unlink()
+    wb.save(run_dir / "input" / "list.xlsx")
+    assert 'action="/bids"' in client.get(sl).get_data(as_text=True)
+    assert json.loads(saved.read_text())[0]["detail_url"].endswith("/9945635")
+
+
 def test_gem_download_failure_falls_back_to_the_form(env, monkeypatch):
     client, _ = env
 

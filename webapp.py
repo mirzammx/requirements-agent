@@ -131,7 +131,10 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         return sorted(p.name for p in Path(samples_dir).iterdir() if p.is_dir())
 
     def shortlist_items(run: Path) -> list[dict]:
-        return _read_json(run / "result" / "shortlist.json", [])
+        items = _read_json(run / "result" / "shortlist.json", [])
+        if any("detail_url" not in i for i in items):
+            items = _add_detail_urls(run, items)  # list saved by an older version of the app
+        return items
 
     def bid_state(bid: Path) -> dict:
         """Everything the pages need to know about where a bid stands."""
@@ -693,6 +696,23 @@ def _closes(t: dict) -> str:
 
 
 DECISION_LOCK = threading.Lock()
+
+
+def _add_detail_urls(run: Path, items: list[dict]) -> list[dict]:
+    """Fill in each tender's portal link from the list's own uploaded Excel, and save it (once)."""
+    from bidtriage.bidassist import read_tender_lists
+
+    try:
+        urls = {t.tender_id: t.detail_url for t in read_tender_lists(sorted((run / "input").glob("*.xlsx")))}
+    except (ValueError, OSError):
+        urls = {}
+    for i in items:
+        i.setdefault("detail_url", urls.get(i.get("tender_id"), ""))
+    try:
+        _atomic_write_text(run / "result" / "shortlist.json", json.dumps(items, indent=2, ensure_ascii=False))
+    except OSError:
+        pass  # still shown correctly; tried again next time
+    return items
 
 
 def _tender_form(tender: dict) -> dict:
