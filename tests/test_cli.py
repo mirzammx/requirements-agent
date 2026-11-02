@@ -53,4 +53,4 @@ def test_provider_gemini_uses_gemini_with_its_default_model(tmp_path, monkeypatc
     monkeypatch.setattr(triage, "analyze_gemini", fake_gemini)
     monkeypatch.setattr(triage, "analyze", claude_must_not_run)
     assert triage.main([str(bid_dir), "--provider", "gemini", "--out", str(tmp_path / "out")]) == 0
-    assert calls["model"] == "gemini-3.8-flash"
+    assert calls["model"] == "gemini-3.6-flash"

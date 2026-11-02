@@ -17,7 +17,7 @@ docker compose build
 
 Credentials: set `$env:ANTHROPIC_API_KEY = "..."` for Claude, or `$env:GEMINI_API_KEY = "..."` for Gemini, in the same PowerShell window. Compose passes them into the container.
 
-**Gemini (proof-of-concept only):** add `--provider gemini` (default model `gemini-3.8-flash`). Free-tier keys from aistudio.google.com work, but Google may use free-tier requests to improve its products, so the production setup is Claude on paid billing. The free tier often returns 503 "high demand"; retry, or try `--model gemini-3.6-flash`.
+**Gemini (proof-of-concept only):** add `--provider gemini` (default model `gemini-3.6-flash`). Free-tier keys from aistudio.google.com work, but Google may use free-tier requests to improve its products, so the production setup is Claude on paid billing. The free tier often returns 503 "high demand"; retry, or try `--model gemini-3.8-flash`.
 
 ## Web app (buttons)
 

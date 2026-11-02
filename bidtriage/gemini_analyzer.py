@@ -17,7 +17,7 @@ from bidtriage.attachments import Skipped
 from bidtriage.models import Bid
 from bidtriage.schema import BidAssessment
 
-DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 # Gemini's limit for a request with inline file data is 20 MB.
 MAX_INLINE_BYTES = 19 * 1024 * 1024
 OK_FINISH = {"STOP", "FINISH_REASON_UNSPECIFIED"}
