@@ -60,6 +60,18 @@ iframe{width:100%;height:1100px;border:1px solid var(--line);border-radius:10px;
 .who.Mahadevan{background:var(--med-bg);color:var(--med)}.who.BD{background:var(--ok-bg);color:var(--ok)}
 .who.Problem{background:var(--high-bg);color:var(--high)}
 .status{font-size:13px;color:var(--muted)}
+.todo-group{margin-top:22px}.todo-group:first-of-type{margin-top:6px}
+.todo-group h3{font-size:16px;margin:0;display:flex;align-items:center;gap:8px}
+.todo-group .plain{margin:2px 0 8px;font-size:14px}
+table.todo{width:100%;border-collapse:collapse;table-layout:fixed}
+table.todo th{text-align:left;font-size:12px;font-weight:600;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line)}
+table.todo th:first-child{width:42%}table.todo th:last-child{width:130px}
+table.todo td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:middle;overflow-wrap:anywhere}
+table.todo tr:last-child td{border-bottom:0}
+table.todo td a:not(.btn){font-weight:600}
+table.todo td.go{text-align:right}
+@media (max-width:600px){table.todo thead{display:none}table.todo,table.todo tbody,table.todo tr,table.todo td{display:block;width:auto}
+  table.todo tr{padding:8px 0;border-bottom:1px solid var(--line)}table.todo td{border:0;padding:3px 0}table.todo td.go{text-align:left}}
 .big-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:16px}
 .big-actions .card{margin:0}
 </style>

@@ -76,6 +76,18 @@ def _read_json(path: Path, default):
         return default
 
 
+# Home's to-do tables, in the order the work flows (problems first so they are seen).
+TODO_GROUPS = [
+    {"id": "problem", "title": "Something went wrong", "who": "Problem", "hint": "Open it and press Try again."},
+    {"id": "check", "title": "Check or skip", "who": "BD", "hint": "New tenders from BidAssist: get the RFQ, or skip."},
+    {"id": "rfq", "title": "Upload the RFQ", "who": "BD", "hint": "Chosen tenders still waiting for their RFQ files."},
+    {"id": "decide", "title": "Decide: bid or not", "who": "Mahadevan", "hint": "The AI summary is ready to read."},
+    {"id": "documents", "title": "Make reply documents", "who": "BD", "hint": "Decision was Yes, bid."},
+    {"id": "send", "title": "Send the reply", "who": "You", "hint": "The reply to BD is in (or going to) your Outlook Drafts."},
+    {"id": "wait", "title": "AI is working", "who": "Wait", "hint": "Nothing to do; these finish by themselves."},
+]
+
+
 def _default_provider() -> str:
     return "gemini" if os.environ.get("GEMINI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY") else "claude"
 
@@ -195,12 +207,12 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
                     continue  # closed: nothing to do
                 choice = decisions.get(t["tender_id"])
                 if not choice:
-                    actions.append({"who": "BD", "what": "Check or skip", "title": t["summary"],
+                    actions.append({"group": "check", "who": "BD", "what": "Check or skip", "title": t["summary"],
                                     "detail": f"{t['authority']} · {_closes(t)}",
                                     "href": url_for("show_shortlist", run_id=run["id"]) + "#" + _anchor(t["tender_id"]),
                                     "button": "Open list"})
                 elif choice == "Fetch" and t["tender_id"] not in started:
-                    actions.append({"who": "BD", "what": "Upload the RFQ", "title": t["summary"],
+                    actions.append({"group": "rfq", "who": "BD", "what": "Upload the RFQ", "title": t["summary"],
                                     "detail": f"{t['authority']} · {_closes(t)}",
                                     "href": url_for("new_bid", shortlist=run["id"], tender=t["tender_id"]),
                                     "button": "Upload"})
@@ -208,24 +220,24 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
             m, st = s["meta"], s["status"].get("state")
             href = url_for("show_bid", bid_id=m["id"])
             if st == "running":
-                actions.append({"who": "Wait", "what": STEP_TEXT.get(s["status"].get("step", ""), "Working…"),
+                actions.append({"group": "wait", "who": "Wait", "what": STEP_TEXT.get(s["status"].get("step", ""), "Working…"),
                                 "title": m["title"], "detail": "", "href": href, "button": "Open"})
             elif st == "failed":
-                actions.append({"who": "Problem", "what": "Something went wrong",
+                actions.append({"group": "problem", "who": "Problem", "what": "Something went wrong",
                                 "title": m["title"], "detail": s["status"].get("error", ""), "href": href,
                                 "button": "Open"})
             elif s["can_draft"] and not s["decision"]:
-                actions.append({"who": "Mahadevan", "what": "Decide: bid or not", "title": m["title"],
+                actions.append({"group": "decide", "who": "Mahadevan", "what": "Decide: bid or not", "title": m["title"],
                                 "detail": "AI summary is ready", "href": href + "#decide", "button": "Read summary"})
             elif s["decision"] == "Go" and not s["has_files"]:
-                actions.append({"who": "BD", "what": "Make the reply documents", "title": m["title"],
+                actions.append({"group": "documents", "who": "BD", "what": "Make the reply documents", "title": m["title"],
                                 "detail": "Decision: Yes, bid", "href": href + "#response", "button": "Open"})
             elif s["reply"]["state"] == "due":
-                actions.append({"who": "You", "what": "Reply is ready for Outlook", "title": m["title"],
+                actions.append({"group": "send", "who": "You", "what": "Reply is ready for Outlook", "title": m["title"],
                                 "detail": "The mail helper will put it in your Outlook Drafts (start it if it is not running)",
                                 "href": href + "#decide", "button": "Open"})
             elif s["reply"]["state"] == "drafted" and _within_days(s["reply"].get("drafted_at", ""), 3):
-                actions.append({"who": "You", "what": "Send the reply from Outlook Drafts",
+                actions.append({"group": "send", "who": "You", "what": "Send the reply from Outlook Drafts",
                                 "title": m["title"], "detail": f"Put in Drafts on {s['reply']['drafted_at']}",
                                 "href": href + "#decide", "button": "Open"})
         return actions
@@ -243,7 +255,9 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
 
     @app.get("/")
     def index():
-        return render_template("index.html", active="overview", actions=needs_action(),
+        actions = needs_action()
+        todo = [{**g, "rows": [a for a in actions if a["group"] == g["id"]]} for g in TODO_GROUPS]
+        return render_template("index.html", active="overview", todo=[g for g in todo if g["rows"]],
                                shortlists=listing(lists_dir)[:5], bids=all_bids()[:5])
 
     @app.get("/shortlists")

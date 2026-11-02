@@ -349,6 +349,18 @@ def test_overview_lists_what_needs_action(env):
     assert "HAL AHRU card" in html and "Decide: bid or not" in html
 
 
+def test_home_groups_the_to_do_list_into_a_table_per_next_action(env):
+    client, _ = env
+    _shortlist_with_candidate(client)
+    _new_bid(client, subject="HAL AHRU card")
+    html = client.get("/").get_data(as_text=True)
+    check, decide = html.index('id="todo-check"'), html.index('id="todo-decide"')
+    assert check < decide                                          # in the order the work flows
+    assert "Variable SMPS" in html[check:decide] and "HAL AHRU card" in html[decide:]
+    assert html.count('<table class="todo"') == 2                  # only groups that have something in them
+    assert "Check or skip (1)" in html and "Decide: bid or not (1)" in html
+
+
 def test_bid_decision_on_card(env):
     client, data = env
     url = _new_bid(client)

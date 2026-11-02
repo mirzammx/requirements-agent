@@ -4,14 +4,22 @@
 {% block content %}
 <section class="card">
   <h2>To do</h2>
-  {% for a in actions %}
-  <div class="row-item">
-    <span class="who {{ a.who }}">{{ a.who }}</span>
-    <div class="main">
-      <div><strong>{{ a.what }}</strong> · <a href="{{ a.href }}">{{ a.title }}</a></div>
-      {% if a.detail %}<div class="status">{{ a.detail }}</div>{% endif %}
-    </div>
-    <a class="btn small" href="{{ a.href }}">{{ a.button }}</a>
+  {% for g in todo %}
+  <div class="todo-group" id="todo-{{ g.id }}">
+    <h3><span class="who {{ g.who }}">{{ g.who }}</span> {{ g.title }} ({{ g.rows|length }})</h3>
+    <p class="plain">{{ g.hint }}</p>
+    <table class="todo">
+      <thead><tr><th>Tender</th><th>Details</th><th></th></tr></thead>
+      <tbody>
+      {% for a in g.rows %}
+      <tr>
+        <td><a href="{{ a.href }}">{{ a.title }}</a></td>
+        <td class="status">{% if g.id in ('send', 'wait') %}{{ a.what }}{% if a.detail %} · {% endif %}{% endif %}{{ a.detail }}</td>
+        <td class="go"><a class="btn small{{ '' if g.id != 'wait' else ' secondary' }}" href="{{ a.href }}">{{ a.button }}</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
   </div>
   {% else %}
   <p class="plain">Nothing to do right now.</p>
