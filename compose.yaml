@@ -28,6 +28,8 @@ services:
       - GEMINI_API_KEY
       - TZ=Asia/Kolkata
     command: ["webapp.py"]
+    # Comes back by itself whenever Docker Desktop starts. API keys can live in a .env file here (git-ignored).
+    restart: unless-stopped
     # Only this PC can reach the app.
     ports:
       - "127.0.0.1:8010:8000"

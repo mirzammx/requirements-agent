@@ -27,9 +27,11 @@ docker compose up -d web          # start; then open http://localhost:8010
 docker compose down               # stop
 ```
 
-- **Screen**: upload BidAssist "Tender List" .xlsx files. Candidates get **Go / No-go / Ask** buttons; decisions are saved into the tracker.
-- **Run triage**: upload the bid email (.msg) or the RFQ PDFs plus the email text. The card appears on the bid page.
-- **Generate response**: on the bid page. Then download each file, or **Download all (.zip)**.
+- **BidAssist lists**: upload the "Power supply - Tender List" .xlsx. For each tender worth a look, BD presses **Get RFQ & check** (or **Skip**, which can be undone).
+- **Add tender**: paste the GeM document link (the app downloads it and checks the bid number), or upload the RFQ PDFs / BD's email (.msg). The AI writes a summary.
+- **Do we bid?**: Mahadevan reads the AI summary and picks **Yes, bid / No / Need more info**. On "Yes, bid" the reply documents are made; download them, fill the yellow gaps and prices.
+
+GeM links: open the bid on bidplus.gem.gov.in, right-click its bid document, copy the link (`https://bidplus.gem.gov.in/showbidDocument/...`). Looking bids up on GeM automatically would need GeM's permission, so the link is pasted by hand.
 
 Long steps run in the background; the page shows "Working…" and refreshes itself. Everything is stored under `data/` (git-ignored). The app is reachable from this PC only (port 8010, because 8000 is used by another local app).
 
@@ -39,11 +41,12 @@ Long steps run in the background; the page shows "Working…" and refreshes itse
 powershell -ExecutionPolicy Bypass -File .\mailwatch.ps1        # keep running; Ctrl+C to stop
 ```
 
-- Put BD's bid mails and BidAssist alert mails into the Outlook folder **Inbox › Bid desk** (drag them, or add an Outlook rule). The watcher picks each one up once and tags it "Bid desk: picked up".
+- BD's bid mails and BidAssist alert mails go into the Outlook folder **Inbox › Bid desk**. `setup-outlook-rules.ps1` adds two Outlook rules that do this for new mail (BD sender + attachment + a tender word in the subject, not "RE:"; any sender containing "bidassist"); you can also drag mails in. The watcher picks each one up once and tags it "Bid desk: picked up".
+- Start at login: `install-autostart.ps1` adds a Startup shortcut that runs `start-biddesk.ps1` (waits for Docker, starts the app, runs the watcher; log in `data\logs\biddesk.log`). Turn on "Start Docker Desktop when you sign in", and put the API key in a `.env` file (`GEMINI_API_KEY=...`, git-ignored). Undo with `install-autostart.ps1 -Remove`.
 - A bid mail becomes a bid and is triaged. A BidAssist alert is screened, but only its **Power supply** list (`prompts/intake.toml` › `screen_alerts`); "My Preference" is ignored for now.
 - After Mahadevan's Go / No-go / Ask on the card, the reply to BD is created as a **ReplyAll draft in your Outlook Drafts**, with Mahadevan in CC and the response pack attached on Go. It is never sent automatically.
 - Needs classic Outlook open and the web app running.
-- If you add an Outlook rule, make it match only new mails from BD or BidAssist (not "RE:" replies, and not mail from yourself), otherwise replies in the thread would each become a new bid and a new AI run.
+- If you change the Outlook rules, keep them matching only new mails from BD or BidAssist (not "RE:" replies, and not mail from yourself), otherwise replies in the thread would each become a new bid and a new AI run.
 - Tests for the watcher's own logic: `powershell -ExecutionPolicy Bypass -File .\tests\test_mailwatch.ps1`.
 
 The same steps are also available as commands:
