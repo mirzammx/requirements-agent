@@ -28,12 +28,12 @@
 <div class="notice failed"><strong>Something went wrong.</strong> {{ status.error }}
   {% if not can_draft or status.step == 'triage' %}
   <form method="post" action="{{ url_for('retriage_bid', bid_id=meta.id) }}" style="margin-top:10px">
-    <input type="hidden" name="provider" value="{{ meta.provider or default_provider }}">
+    <input type="hidden" name="provider" value="{{ default_provider }}">
     <button class="btn small" type="submit">Try again</button>
   </form>
   {% else %}
   <form method="post" action="{{ url_for('draft_bid', bid_id=meta.id) }}" style="margin-top:10px">
-    <input type="hidden" name="provider" value="{{ meta.provider or default_provider }}">
+    <input type="hidden" name="provider" value="{{ default_provider }}">
     <button class="btn small" type="submit">Try again</button>
   </form>
   {% endif %}
