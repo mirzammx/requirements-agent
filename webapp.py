@@ -26,7 +26,7 @@ import draft
 import shortlist
 import triage
 from bidtriage.email_loader import load_bid
-from bidtriage.gem import GemError, bid_numbers_in_pdf, fetch_gem_document
+from bidtriage.gem import GemError, bid_numbers_in_pdf, fetch_gem_document, gem_document_link
 from bidtriage.intake import classify_mail, load_intake_settings
 from bidtriage.render import CSS
 from bidtriage.reply import build_reply
@@ -259,11 +259,7 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         tender_id = request.values.get("tender", "")
         tender = tender_from(run_id, tender_id)
         if tender and not form:
-            form = {"subject": tender["summary"],
-                    "body": (f"Tender: {tender.get('tender_no') or tender['tender_id']}\n"
-                             f"Authority: {tender['authority']}\nLocation: {tender.get('location', '')}\n"
-                             f"Closes: {tender.get('closing_date', '')}\nValue: {tender.get('amount') or '-'}\n"
-                             f"Picked by BD from the BidAssist list.")}
+            form = _tender_form(tender)
         return render_template("bid_new.html", active="new", samples=samples(), error=error, form=form,
                                tender=tender, run_id=run_id if tender else "",
                                run_meta=_read_json(lists_dir / run_id / "meta.json", {}) if tender else {}), status
@@ -278,11 +274,16 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         subject, body = request.form.get("subject", "").strip(), request.form.get("body", "").strip()
         run_id, tender_id = request.form.get("shortlist", ""), request.form.get("tender", "")
         gem_link = request.form.get("gem_link", "").strip()
-        form = {"subject": subject, "body": body, "gem_link": gem_link}
         if sample and sample not in samples():
             abort(400)
-        if (run_id or tender_id) and not tender_from(run_id, tender_id):
+        tender = tender_from(run_id, tender_id)
+        if (run_id or tender_id) and not tender:
             abort(400)
+        if tender and not (sample or files or gem_link):
+            # "Get RFQ & check" straight from the BidAssist list: fill in what the list already knows.
+            known = _tender_form(tender)
+            subject, body, gem_link = subject or known["subject"], body or known["body"], known["gem_link"]
+        form = {"subject": subject, "body": body, "gem_link": gem_link}
         if not sample and not files and not gem_link:
             return new_bid("Add the RFQ files (PDF, Excel or the email .msg), or paste a GeM document link.", 400, form)
         if sum(Path(f.filename).suffix.lower() in EMAIL_SUFFIXES for f in files) > 1:
@@ -597,6 +598,7 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
 
     app.add_template_filter(_anchor, "anchor")
     app.add_template_filter(_closes, "closes")
+    app.add_template_filter(lambda t: gem_document_link(t.get("detail_url", "")), "gem_doc")
     return app
 
 
@@ -691,6 +693,16 @@ def _closes(t: dict) -> str:
 
 
 DECISION_LOCK = threading.Lock()
+
+
+def _tender_form(tender: dict) -> dict:
+    """The Add tender form, filled in from a BidAssist list row."""
+    return {"subject": tender["summary"],
+            "body": (f"Tender: {tender.get('tender_no') or tender['tender_id']}\n"
+                     f"Authority: {tender['authority']}\nLocation: {tender.get('location', '')}\n"
+                     f"Closes: {tender.get('closing_date', '')}\nValue: {tender.get('amount') or '-'}\n"
+                     f"Picked by BD from the BidAssist list."),
+            "gem_link": gem_document_link(tender.get("detail_url", ""))}
 
 
 def _set_tender_decision(run: Path, tender_id: str, decision: str) -> str:

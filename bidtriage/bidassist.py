@@ -9,7 +9,7 @@ COLUMNS = {
     "tender id": "tender_id", "tender no": "tender_no", "tender authority": "authority",
     "tender amount": "amount", "opening date": "opening_date", "closing date": "closing_date", "emd": "emd",
     "location": "location", "summary": "summary", "description": "description",
-    "matching keyword": "keyword", "corrigendum (y/n)": "corrigendum",
+    "matching keyword": "keyword", "corrigendum (y/n)": "corrigendum", "tender detail url": "detail_url",
 }
 HEADER_SCAN_ROWS = 15
 
@@ -29,6 +29,7 @@ class Tender:
     keyword: str = ""
     corrigendum: bool = False
     source: str = ""
+    detail_url: str = ""  # the buyer's portal page, e.g. bidplus.gem.gov.in/bidding/bid/getBidResultView/<id>
 
 
 def parse_date(text: str) -> date | None:
@@ -66,7 +67,7 @@ def _read_sheet(ws, source: str) -> list[Tender] | None:
 
 
 MERGE_FIELDS = ("tender_no", "authority", "amount", "opening_date", "closing_date", "emd", "location", "summary",
-                "description", "keyword")
+                "description", "keyword", "detail_url")
 
 
 def _merge(kept: Tender, new: Tender) -> None:

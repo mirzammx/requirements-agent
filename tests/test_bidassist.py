@@ -26,6 +26,13 @@ def make_xlsx(path, sheets):
     return path
 
 
+def test_reads_tender_detail_url(tmp_path):
+    url = "https://bidplus.gem.gov.in/bidding/bid/getBidResultView/9945635"
+    f = make_xlsx(tmp_path / "a.xlsx", {"Tender List": [HEADER + ["Tender Detail Url"],
+                                                        row("GEM/2026/B/1", "SMPS") + [url]]})
+    assert read_tender_lists([f])[0].detail_url == url
+
+
 def test_reads_both_sheets(tmp_path):
     f = make_xlsx(tmp_path / "Power supply-Tender List_26092026.xlsx", {
         "Tender List_26092026": [HEADER, row("GEM/2026/B/1", "Category: Variable SMPS")],

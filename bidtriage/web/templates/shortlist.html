@@ -21,7 +21,17 @@
       <input type="hidden" name="tender_id" value="{{ t.tender_id }}"><input type="hidden" name="decision" value="Clear">
       <button class="btn small secondary" type="submit">Undo</button>
     </form>
+    {% elif t|gem_doc %}
+    <form class="inline-form" method="post" action="{{ url_for('create_bid') }}" title="Downloads the bid document from GeM and starts the AI summary">
+      <input type="hidden" name="shortlist" value="{{ meta.id }}"><input type="hidden" name="tender" value="{{ t.tender_id }}">
+      <button class="btn small" type="submit">Get RFQ &amp; check</button>
+    </form>
+    <form class="inline-form" method="post" action="{{ url_for('decide', run_id=meta.id) }}">
+      <input type="hidden" name="tender_id" value="{{ t.tender_id }}"><input type="hidden" name="decision" value="Skip">
+      <button class="btn small secondary" type="submit">Skip</button>
+    </form>
     {% else %}
+    {% if t.detail_url and t.detail_url.startswith('https://') %}<a class="btn small secondary" href="{{ t.detail_url }}" target="_blank" rel="noopener noreferrer">Open on tender site</a>{% endif %}
     <a class="btn small" href="{{ url_for('new_bid', shortlist=meta.id, tender=t.tender_id) }}">Get RFQ &amp; check</a>
     <form class="inline-form" method="post" action="{{ url_for('decide', run_id=meta.id) }}">
       <input type="hidden" name="tender_id" value="{{ t.tender_id }}"><input type="hidden" name="decision" value="Skip">
@@ -49,7 +59,7 @@
 {% if total %}
 <section class="card">
   <h2>Worth a look ({{ groups.sbu2_power|length }})</h2>
-  <p class="plain">BD: for each one, press <strong>Get RFQ &amp; check</strong> (paste the GeM link or upload the RFQ), or <strong>Skip</strong>.</p>
+  <p class="plain">BD: for each one, press <strong>Get RFQ &amp; check</strong> or <strong>Skip</strong>. GeM tenders are downloaded by themselves; for other sites, download the RFQ and upload it.</p>
   {% for t in groups.sbu2_power %}{{ tender(t) }}{% else %}<p class="plain">None this time.</p>{% endfor %}
 </section>
 

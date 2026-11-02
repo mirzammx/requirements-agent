@@ -4,7 +4,16 @@ import httpx
 import pytest
 from pypdf import PdfWriter
 
-from bidtriage.gem import GemError, bid_numbers_in_pdf, fetch_gem_document, is_gem_link
+from bidtriage.gem import GemError, bid_numbers_in_pdf, fetch_gem_document, gem_document_link, is_gem_link
+
+
+def test_document_link_from_bidassist_detail_url():
+    assert gem_document_link("https://bidplus.gem.gov.in/bidding/bid/getBidResultView/9945635") \
+        == "https://bidplus.gem.gov.in/showbidDocument/9945635"
+    assert gem_document_link("https://bidplus.gem.gov.in/showbidDocument/12") == "https://bidplus.gem.gov.in/showbidDocument/12"
+    assert gem_document_link("https://defproc.gov.in/nicgep/app?page=FrontEndViewTender") == ""
+    assert gem_document_link("https://evil.example/bidding/bid/getBidResultView/9945635") == ""
+    assert gem_document_link("") == ""
 
 
 def _pdf_with_text(text: str) -> bytes:

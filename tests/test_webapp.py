@@ -39,7 +39,9 @@ def fake_draft(path, card_dir, **kwargs):
 
 ITEMS = [
     Shortlisted(Tender(tender_id="GEM/2026/B/8082649", authority="BEL", summary="Variable SMPS",
-                       closing_date="05-Oct-2026"), "sbu2_power", "SBU-2", "high", "SMPS unit", 3),
+                       closing_date="05-Oct-2026",
+                       detail_url="https://bidplus.gem.gov.in/bidding/bid/getBidResultView/9945635"),
+                "sbu2_power", "SBU-2", "high", "SMPS unit", 3),
     Shortlisted(Tender(tender_id="MES1", authority="MES", summary="Power supply to barriers"),
                 "not_relevant", "none", "high", "Civil works", 2),
 ]
@@ -52,7 +54,8 @@ def fake_shortlist(paths, *, out_dir, **kwargs):
     data = [{"tender_id": s.tender.tender_id, "authority": s.tender.authority, "summary": s.tender.summary,
              "closing_date": s.tender.closing_date, "category": s.category, "route_to": s.route_to,
              "confidence": s.confidence, "reason": s.reason, "days_left": s.days_left, "location": "",
-             "amount": "", "emd": "", "tender_no": "", "corrigendum": False} for s in ITEMS]
+             "amount": "", "emd": "", "tender_no": "", "corrigendum": False, "detail_url": s.tender.detail_url}
+            for s in ITEMS]
     (out_dir / "shortlist.json").write_text(json.dumps(data), encoding="utf-8")
     return out_dir, ITEMS
 
@@ -315,10 +318,11 @@ def test_check_tender_from_list_links_both_ways(env):
     client, data = env
     sl = _shortlist_with_candidate(client)
     page = client.get(sl).get_data(as_text=True)
-    assert "Get RFQ" in page and "tender=GEM" in page
+    assert "Get RFQ" in page and 'action="/bids"' in page
     run_id = sl.rstrip("/").split("/")[-1]
     form = client.get(f"/bids/new?shortlist={run_id}&tender=GEM/2026/B/8082649").get_data(as_text=True)
-    assert 'value="Variable SMPS' in form and 'name="tender"' in form and 'name="gem_link"' in form
+    assert 'value="Variable SMPS' in form and 'name="tender"' in form
+    assert 'value="https://bidplus.gem.gov.in/showbidDocument/9945635"' in form
     url = _new_bid(client, subject="Variable SMPS", shortlist=run_id, tender="GEM/2026/B/8082649")
     assert f'href="/shortlists/{run_id}' in client.get(url).get_data(as_text=True)
     assert "Open tender" in client.get(sl).get_data(as_text=True)
@@ -329,7 +333,7 @@ def test_skipped_candidate_has_no_start_bid(env):
     client, _ = env
     sl = _shortlist_with_candidate(client)
     client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Skip"})
-    assert "tender=GEM" not in client.get(sl).get_data(as_text=True)
+    assert 'action="/bids"' not in client.get(sl).get_data(as_text=True)
 
 
 def test_overview_lists_what_needs_action(env):
@@ -552,7 +556,7 @@ def test_skip_can_be_undone(env):
     assert "Undo" in client.get(sl).get_data(as_text=True)
     client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Clear"})
     page = client.get(sl).get_data(as_text=True)
-    assert "tender=GEM" in page
+    assert 'action="/bids"' in page
     run_dir = next((data / "shortlists").iterdir())
     assert "GEM/2026/B/8082649" not in json.loads((run_dir / "decisions.json").read_text())
 
@@ -586,6 +590,33 @@ def test_gem_link_for_another_bid_is_refused(env, monkeypatch):
     body = r.get_data(as_text=True)
     assert "GEM/2025/B/6447105" in body and "GEM/2026/B/8082649" in body
     assert not (data / "bids").exists() or not any((data / "bids").iterdir())
+
+
+def test_get_rfq_from_list_downloads_gem_document_in_one_click(env, monkeypatch):
+    client, data = env
+    asked = []
+    monkeypatch.setattr(webapp, "fetch_gem_document", lambda url: asked.append(url) or b"%PDF-1.4 gem doc")
+    monkeypatch.setattr(webapp, "bid_numbers_in_pdf", lambda pdf: ["GEM/2026/B/8082649"])
+    run_id = _shortlist_with_candidate(client).rstrip("/").split("/")[-1]
+    r = client.post("/bids", data={"shortlist": run_id, "tender": "GEM/2026/B/8082649"})
+    assert r.status_code == 302 and asked == ["https://bidplus.gem.gov.in/showbidDocument/9945635"]
+    bid_dir = next((data / "bids").iterdir())
+    assert (bid_dir / "input" / "GeM_bid_document.pdf").is_file()
+    assert "Subject: Variable SMPS" in (bid_dir / "input" / "email.txt").read_text(encoding="utf-8")
+    assert json.loads((bid_dir / "meta.json").read_text())["title"] == "Variable SMPS"
+
+
+def test_gem_download_failure_falls_back_to_the_form(env, monkeypatch):
+    client, _ = env
+
+    def down(url):
+        raise webapp.GemError("GeM answered 503")
+
+    monkeypatch.setattr(webapp, "fetch_gem_document", down)
+    run_id = _shortlist_with_candidate(client).rstrip("/").split("/")[-1]
+    r = client.post("/bids", data={"shortlist": run_id, "tender": "GEM/2026/B/8082649"})
+    html = r.get_data(as_text=True)
+    assert r.status_code == 400 and "GeM answered 503" in html and 'name="files"' in html
 
 
 def test_bad_gem_link_is_refused(env):
