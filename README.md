@@ -31,7 +31,7 @@ docker compose down               # stop
 - **Add tender**: paste the GeM document link (the app downloads it and checks the bid number), or upload the RFQ PDFs / BD's email (.msg). The AI writes a summary.
 - **Do we bid?**: Mahadevan reads the AI summary and picks **Yes, bid / No / Need more info**. On "Yes, bid" the reply documents are made; download them, fill the yellow gaps and prices.
 
-GeM links: open the bid on bidplus.gem.gov.in, right-click its bid document, copy the link (`https://bidplus.gem.gov.in/showbidDocument/...`). Looking bids up on GeM automatically would need GeM's permission, so the link is pasted by hand.
+GeM tenders: the BidAssist Excel's "Tender Detail Url" gives the GeM bid's internal number, so **Get RFQ & check** downloads the bid document by itself (one download per click) and checks the bid number inside it. For a GeM bid that isn't on a BidAssist list, paste its document link (`https://bidplus.gem.gov.in/showbidDocument/...`) in Add tender. Other portals (defproc, CPPP, ...) still need the RFQ downloaded and uploaded.
 
 Long steps run in the background; the page shows "Working…" and refreshes itself. Everything is stored under `data/` (git-ignored). The app is reachable from this PC only (port 8010, because 8000 is used by another local app).
 
