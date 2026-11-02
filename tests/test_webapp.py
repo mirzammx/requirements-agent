@@ -82,7 +82,7 @@ def _new_bid(client, **data):
 def test_dashboard_renders(env):
     client, _ = env
     html = client.get("/").get_data(as_text=True)
-    assert "Needs action" in html and "Screen BidAssist exports" in html
+    assert "To do" in html and "Add BidAssist list" in html
     assert "ahru-hal-hyd" in client.get("/bids/new").get_data(as_text=True)
 
 
@@ -90,7 +90,7 @@ def test_upload_bid_runs_triage_and_shows_card(env):
     client, data = env
     url = _new_bid(client)
     html = client.get(url).get_data(as_text=True)
-    assert "Generate response" in html and "/card" in html
+    assert "Make reply documents" in html and "/card" in html
     bid_dir = next((data / "bids").iterdir())
     assert (bid_dir / "input" / "RFQ_Tender.pdf").is_file()
     assert "Subject: HAL AHRU" in (bid_dir / "input" / "email.txt").read_text(encoding="utf-8")
@@ -110,7 +110,7 @@ def test_upload_without_files_errors(env):
     client, data = env
     resp = client.post("/bids", data={"provider": "gemini", "subject": "x"}, content_type="multipart/form-data")
     assert resp.status_code == 400
-    assert "Add the bid documents" in resp.get_data(as_text=True)
+    assert "Add the RFQ files" in resp.get_data(as_text=True)
     assert not (data / "bids").exists() or not any((data / "bids").iterdir())
 
 
@@ -119,7 +119,7 @@ def test_generate_response_lists_files_and_downloads(env):
     url = _new_bid(client)
     assert client.post(url + "/draft", data={"provider": "gemini"}).status_code == 302
     html = client.get(url).get_data(as_text=True)
-    assert "Technical_Compliance.docx" in html and "47 placeholders" in html and "8 lines to price" in html
+    assert "Technical_Compliance.docx" in html and "47 yellow gaps" in html and "8 prices to fill" in html
     assert client.get(url + "/files/Price_Bid.xlsx").data == b"content of Price_Bid.xlsx"
 
 
@@ -159,7 +159,7 @@ def test_running_job_page_refreshes(env):
     bid_dir = next((data / "bids").iterdir())
     jobs.write_status(bid_dir, {"state": "running", "step": "draft"})
     html = client.get(url).get_data(as_text=True)
-    assert 'http-equiv="refresh"' in html and "Drafting the response" in html
+    assert 'http-equiv="refresh"' in html and "Making the reply documents" in html
 
 
 def test_double_submit_starts_one_job(env, monkeypatch):
@@ -181,7 +181,7 @@ def test_shortlist_upload_and_decide(env):
     assert resp.status_code == 302
     url = resp.headers["Location"]
     html = client.get(url).get_data(as_text=True)
-    assert "Variable SMPS" in html and "Fetch documents" in html and "Civil works" in html
+    assert "Variable SMPS" in html and "Get RFQ" in html and "Civil works" in html
     assert client.post(url + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Fetch"}).status_code == 302
     run_dir = next((data / "shortlists").iterdir())
     assert json.loads((run_dir / "decisions.json").read_text())["GEM/2026/B/8082649"] == "Fetch"
@@ -209,11 +209,11 @@ def test_failed_triage_can_be_rerun(env, monkeypatch):
 
     monkeypatch.setattr(triage, "run_triage", boom)
     url = _new_bid(client)
-    assert "Run triage again" in client.get(url).get_data(as_text=True)
+    assert "Try again" in client.get(url).get_data(as_text=True)
     monkeypatch.setattr(triage, "run_triage", fake_triage)
     assert client.post(url + "/triage", data={"provider": "gemini"}).status_code == 302
     html = client.get(url).get_data(as_text=True)
-    assert "Generate response" in html and "could not reach" not in html
+    assert "Make reply documents" in html and "could not reach" not in html
 
 def _eml_bytes():
     from email.message import EmailMessage
@@ -270,7 +270,7 @@ def test_rebuild_from_saved_draft(env, monkeypatch):
     client.post(url + "/draft", data={"provider": "gemini"})
     bid_dir = next((data / "bids").iterdir())
     (bid_dir / "card" / "response" / "draft.json").write_text("{}", encoding="utf-8")
-    assert "Rebuild documents" in client.get(url).get_data(as_text=True)
+    assert "Remake documents" in client.get(url).get_data(as_text=True)
     seen = {}
     monkeypatch.setattr(draft, "run_draft", lambda *a, **k: seen.update(k) or RESPONSE_FILES)
     assert client.post(url + "/rebuild").status_code == 302
@@ -308,23 +308,22 @@ def test_breadcrumbs_show_where_you_are(env):
     client, _ = env
     sl = _shortlist_with_candidate(client)
     html = client.get(sl).get_data(as_text=True)
-    assert 'aria-label="Breadcrumb"' in html and 'href="/shortlists">Shortlists' in html
+    assert 'aria-label="Breadcrumb"' in html and 'href="/shortlists">BidAssist lists' in html
 
 
-def test_fetch_then_start_bid_links_tender_and_bid_both_ways(env):
+def test_check_tender_from_list_links_both_ways(env):
     client, data = env
     sl = _shortlist_with_candidate(client)
-    client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Fetch"})
     page = client.get(sl).get_data(as_text=True)
-    assert "Start bid" in page and "tender=GEM" in page
+    assert "Get RFQ" in page and "tender=GEM" in page
     run_id = sl.rstrip("/").split("/")[-1]
     form = client.get(f"/bids/new?shortlist={run_id}&tender=GEM/2026/B/8082649").get_data(as_text=True)
-    assert 'value="Variable SMPS' in form and 'name="tender"' in form
+    assert 'value="Variable SMPS' in form and 'name="tender"' in form and 'name="gem_link"' in form
     url = _new_bid(client, subject="Variable SMPS", shortlist=run_id, tender="GEM/2026/B/8082649")
-    bid_page = client.get(url).get_data(as_text=True)
-    assert f'href="/shortlists/{run_id}' in bid_page
-    assert "Open bid" in client.get(sl).get_data(as_text=True)
-
+    assert f'href="/shortlists/{run_id}' in client.get(url).get_data(as_text=True)
+    assert "Open tender" in client.get(sl).get_data(as_text=True)
+    run_dir = next((data / "shortlists").iterdir())
+    assert json.loads((run_dir / "decisions.json").read_text())["GEM/2026/B/8082649"] == "Fetch"
 
 def test_skipped_candidate_has_no_start_bid(env):
     client, _ = env
@@ -337,23 +336,23 @@ def test_overview_lists_what_needs_action(env):
     client, _ = env
     sl = _shortlist_with_candidate(client)
     html = client.get("/").get_data(as_text=True)
-    assert "Variable SMPS" in html and "Fetch documents or skip" in html
+    assert "Variable SMPS" in html and "Check or skip" in html
     client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Fetch"})
     html = client.get("/").get_data(as_text=True)
-    assert "Start the bid" in html
+    assert "Upload the RFQ" in html
     _new_bid(client, subject="HAL AHRU card")
     html = client.get("/").get_data(as_text=True)
-    assert "HAL AHRU card" in html and "Go / No-go on the card" in html
+    assert "HAL AHRU card" in html and "Decide: bid or not" in html
 
 
 def test_bid_decision_on_card(env):
     client, data = env
     url = _new_bid(client)
     html = client.get(url).get_data(as_text=True)
-    assert "Go / No-go" in html and 'class="step current"' in html
+    assert "Do we bid?" in html and 'class="step current"' in html
     assert client.post(url + "/decide", data={"decision": "Go"}).status_code == 302
     html = client.get(url).get_data(as_text=True)
-    assert "Decision: Go" in html
+    assert "Decision: Yes, bid" in html
     assert client.post(url + "/decide", data={"decision": "Maybe"}).status_code == 400
     bid_dir = next((data / "bids").iterdir())
     assert json.loads((bid_dir / "decision.json").read_text())["decision"] == "Go"
@@ -364,11 +363,11 @@ def test_bid_stepper_points_to_next_action(env):
     url = _new_bid(client)
     html = client.get(url).get_data(as_text=True)
     assert html.index('class="step done"') < html.index('class="step current"')
-    assert "Decide on the card" in html
+    assert "What to do now" in html and "Read the AI summary" in html
     client.post(url + "/decide", data={"decision": "Go"})
     client.post(url + "/draft", data={"provider": "gemini"})
     html = client.get(url).get_data(as_text=True)
-    assert "Download the pack" in html
+    assert "Download the reply documents" in html
 
 # ---------------------------------------------------------------- mail intake + replies
 
@@ -413,7 +412,7 @@ def test_intake_bid_mail_creates_bid_and_runs_triage(mail_env):
     meta = json.loads((data / "bids" / bid_id / "meta.json").read_text())
     assert meta["mail"]["entry_id"] == "E1" and meta["title"] == "AHRU Power Supply Requirement"
     html = client.get(f"/bids/{bid_id}").get_data(as_text=True)
-    assert "From your mail" in html and "Generate response" in html
+    assert "From your mail" in html and "Make reply documents" in html
 
 
 def test_repeat_entry_id_is_idempotent(mail_env):
@@ -493,8 +492,8 @@ def test_no_go_reply_due_then_marked_drafted(mail_env):
     assert r["decision"] == "No-go" and r["attachments"] == [] and "Not feasible" in r["html"]
     assert client.post(f"/api/replies/{bid_id}/drafted", data={"decision": "No-go"}).status_code == 200
     assert client.get("/api/replies").json == []
-    assert "Reply drafted" in client.get(f"/bids/{bid_id}").get_data(as_text=True)
-    assert "send the reply" in client.get("/").get_data(as_text=True)
+    assert "Reply is in your Outlook Drafts" in client.get(f"/bids/{bid_id}").get_data(as_text=True)
+    assert "Send the reply" in client.get("/").get_data(as_text=True)
 
 
 def test_changed_decision_redue_reply(mail_env):
@@ -545,3 +544,51 @@ def test_go_after_retriage_regenerates_stale_pack(mail_env, monkeypatch):
     os.utime(summary, (old, old))                                          # pack older than the card now
     client.post(f"/bids/{bid_id}/decide", data={"decision": "Go"})
     assert len(calls) == 2
+
+def test_skip_can_be_undone(env):
+    client, data = env
+    sl = _shortlist_with_candidate(client)
+    client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Skip"})
+    assert "Undo" in client.get(sl).get_data(as_text=True)
+    client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Clear"})
+    page = client.get(sl).get_data(as_text=True)
+    assert "tender=GEM" in page
+    run_dir = next((data / "shortlists").iterdir())
+    assert "GEM/2026/B/8082649" not in json.loads((run_dir / "decisions.json").read_text())
+
+
+GEM_URL = "https://bidplus.gem.gov.in/showbidDocument/9999999"
+
+
+def _gem_bid(client, sl, link=GEM_URL):
+    run_id = sl.rstrip("/").split("/")[-1]
+    return client.post("/bids", data={"provider": "gemini", "subject": "Variable SMPS", "shortlist": run_id,
+                                      "tender": "GEM/2026/B/8082649", "gem_link": link},
+                       content_type="multipart/form-data")
+
+
+def test_gem_link_is_downloaded_and_checked(env, monkeypatch):
+    client, data = env
+    monkeypatch.setattr(webapp, "fetch_gem_document", lambda url: b"%PDF-1.4 gem doc")
+    monkeypatch.setattr(webapp, "bid_numbers_in_pdf", lambda pdf: ["GEM/2026/B/8082649"])
+    r = _gem_bid(client, _shortlist_with_candidate(client))
+    assert r.status_code == 302
+    bid_dir = next((data / "bids").iterdir())
+    assert (bid_dir / "input" / "GeM_bid_document.pdf").read_bytes() == b"%PDF-1.4 gem doc"
+
+
+def test_gem_link_for_another_bid_is_refused(env, monkeypatch):
+    client, data = env
+    monkeypatch.setattr(webapp, "fetch_gem_document", lambda url: b"%PDF-1.4 other")
+    monkeypatch.setattr(webapp, "bid_numbers_in_pdf", lambda pdf: ["GEM/2025/B/6447105"])
+    r = _gem_bid(client, _shortlist_with_candidate(client))
+    assert r.status_code == 400
+    body = r.get_data(as_text=True)
+    assert "GEM/2025/B/6447105" in body and "GEM/2026/B/8082649" in body
+    assert not (data / "bids").exists() or not any((data / "bids").iterdir())
+
+
+def test_bad_gem_link_is_refused(env):
+    client, _ = env
+    r = _gem_bid(client, _shortlist_with_candidate(client), link="https://evil.example/doc")
+    assert r.status_code == 400 and "not a GeM document link" in r.get_data(as_text=True)

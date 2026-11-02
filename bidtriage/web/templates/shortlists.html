@@ -1,21 +1,21 @@
 {% extends "base.html" %}
-{% from "_macros.html" import crumbs, screen_form %}
-{% block title %}Shortlists{% endblock %}
-{% block crumbs %}{{ crumbs([("Overview", url_for('index')), ("Shortlists", None)]) }}{% endblock %}
+{% from "_macros.html" import crumbs, list_form %}
+{% block title %}BidAssist lists{% endblock %}
+{% block crumbs %}{{ crumbs([("Home", url_for('index')), ("BidAssist lists", None)]) }}{% endblock %}
 {% block content %}
 {% if error %}<div class="notice failed">{{ error }}</div>{% endif %}
 <section class="card">
-  <h2>Screen BidAssist exports</h2>
-  {{ screen_form() }}
+  <h2>Add BidAssist list</h2>
+  {{ list_form() }}
 </section>
 <section class="card">
-  <h2>All shortlists <span class="count">{{ shortlists|length }}</span></h2>
+  <h2>Earlier lists</h2>
   {% for s in shortlists %}
-  <div class="list-row">
-    <div class="main"><a href="{{ url_for('show_shortlist', run_id=s.id) }}">{{ s.title }}</a>
-      <span class="state {{ s.status.state }}">{{ s.status.state }}</span><div class="meta">{{ s.created }}</div></div>
+  <div class="row-item">
+    <div class="main"><a href="{{ url_for('show_shortlist', run_id=s.id) }}">List of {{ s.created }}</a>
+      <div class="status">{{ 'AI is working…' if s.status.state == 'running' else ('Something went wrong' if s.status.state == 'failed' else s.title) }}</div></div>
     <a class="btn small secondary" href="{{ url_for('show_shortlist', run_id=s.id) }}">Open</a>
   </div>
-  {% else %}<p class="none">None yet. Upload a BidAssist export above.</p>{% endfor %}
+  {% else %}<p class="plain">No lists yet.</p>{% endfor %}
 </section>
 {% endblock %}

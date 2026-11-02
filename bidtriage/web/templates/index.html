@@ -1,46 +1,44 @@
 {% extends "base.html" %}
-{% from "_macros.html" import bid_badge, screen_form %}
-{% block title %}Overview{% endblock %}
+{% from "_macros.html" import status_text, list_form with context %}
+{% block title %}Home{% endblock %}
 {% block content %}
 <section class="card">
-  <h2>Needs action <span class="count">{{ actions|length }}</span></h2>
+  <h2>To do</h2>
   {% for a in actions %}
-  <div class="list-row">
+  <div class="row-item">
     <span class="who {{ a.who }}">{{ a.who }}</span>
     <div class="main">
       <div><strong>{{ a.what }}</strong> · <a href="{{ a.href }}">{{ a.title }}</a></div>
-      {% if a.detail %}<div class="meta">{{ a.detail }}</div>{% endif %}
+      {% if a.detail %}<div class="status">{{ a.detail }}</div>{% endif %}
     </div>
     <a class="btn small" href="{{ a.href }}">{{ a.button }}</a>
   </div>
   {% else %}
-  <p class="none">Nothing waiting. Screen today's BidAssist export or start a bid.</p>
+  <p class="plain">Nothing to do right now.</p>
   {% endfor %}
 </section>
 
-<section class="card">
-  <h2>Screen BidAssist exports</h2>
-  <p class="meta" style="margin-top:0">Upload the Excel files from today's BidAssist alert emails. The real power supply tenders are separated from the keyword noise; BD then chooses which to fetch documents for.</p>
-  {{ screen_form() }}
-</section>
+<div class="big-actions">
+  <section class="card">
+    <h2>Add BidAssist list</h2>
+    <p class="plain">The AI picks out the tenders worth a look.</p>
+    {{ list_form() }}
+  </section>
+  <section class="card">
+    <h2>Add tender</h2>
+    <p class="plain">Upload an RFQ (or BD's email) and the AI writes a short summary for Mahadevan.</p>
+    <div class="buttons"><a class="btn" href="{{ url_for('new_bid') }}">+ Add tender</a></div>
+  </section>
+</div>
 
 <section class="card">
-  <h2>Recent bids <span class="count">{{ bids|length }}</span></h2>
+  <h2>Recent tenders</h2>
   {% for s in bids %}
-  <div class="list-row">
-    <div class="main"><a href="{{ url_for('show_bid', bid_id=s.meta.id) }}">{{ s.meta.title }}</a> {{ bid_badge(s) }}
-      <div class="meta">{{ s.meta.created }} · next: {{ s.next_action.text }}</div></div>
+  <div class="row-item">
+    <div class="main"><a href="{{ url_for('show_bid', bid_id=s.meta.id) }}">{{ s.meta.title }}</a>
+      <div class="status">{{ status_text(s) }}</div></div>
   </div>
-  {% else %}<p class="none">No bids yet. <a href="{{ url_for('new_bid') }}">Start one</a>.</p>{% endfor %}
-  <div class="quick" style="margin-top:12px"><a class="btn small secondary" href="{{ url_for('list_bids') }}">All bids</a><a class="btn small" href="{{ url_for('new_bid') }}">+ New bid</a></div>
-</section>
-
-<section class="card">
-  <h2>Recent shortlists <span class="count">{{ shortlists|length }}</span></h2>
-  {% for s in shortlists %}
-  <div class="list-row"><div class="main"><a href="{{ url_for('show_shortlist', run_id=s.id) }}">{{ s.title }}</a>
-    <span class="state {{ s.status.state }}">{{ s.status.state }}</span><div class="meta">{{ s.created }}</div></div></div>
-  {% else %}<p class="none">None yet.</p>{% endfor %}
-  <div class="quick" style="margin-top:12px"><a class="btn small secondary" href="{{ url_for('list_shortlists') }}">All shortlists</a></div>
+  {% else %}<p class="plain">No tenders yet.</p>{% endfor %}
+  {% if bids %}<div class="buttons"><a class="btn small secondary" href="{{ url_for('list_bids') }}">See all tenders</a></div>{% endif %}
 </section>
 {% endblock %}

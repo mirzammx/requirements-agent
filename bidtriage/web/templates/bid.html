@@ -3,98 +3,109 @@
 {% set refresh = status.state == 'running' %}
 {% block title %}{{ meta.title }}{% endblock %}
 {% block crumbs %}
-{% if meta.source %}{{ crumbs([("Overview", url_for('index')), ("Shortlists", url_for('list_shortlists')), ("Shortlist " ~ meta.source.shortlist_created, url_for('show_shortlist', run_id=meta.source.shortlist) ~ '#' ~ (meta.source.tender_id|anchor)), (meta.title, None)]) }}
-{% else %}{{ crumbs([("Overview", url_for('index')), ("Bids", url_for('list_bids')), (meta.title, None)]) }}{% endif %}
+{% if meta.source %}{{ crumbs([("Home", url_for('index')), ("BidAssist lists", url_for('list_shortlists')), ("List of " ~ meta.source.shortlist_created, url_for('show_shortlist', run_id=meta.source.shortlist) ~ '#' ~ (meta.source.tender_id|anchor)), (meta.title, None)]) }}
+{% else %}{{ crumbs([("Home", url_for('index')), ("Tenders", url_for('list_bids')), (meta.title, None)]) }}{% endif %}
 {% endblock %}
 {% block content %}
 <section class="card">
-  <div class="eyebrow">Bid</div>
   <h1>{{ meta.title }}</h1>
-  {% if mail %}<p class="meta" style="margin:0">From your mail of {{ mail.received }}: “{{ mail.subject }}” ({{ mail.sender }})</p>{% endif %}
-  <p class="meta" style="margin:0 0 14px">Created {{ meta.created }}{% if meta.source %} · from the <a href="{{ url_for('show_shortlist', run_id=meta.source.shortlist) }}#{{ meta.source.tender_id|anchor }}">BidAssist shortlist of {{ meta.source.shortlist_created }}</a>{% endif %}</p>
-  <ol class="steps" aria-label="Progress">
+  {% if mail %}<p class="plain">From your mail of {{ mail.received }}: “{{ mail.subject }}” ({{ mail.sender }})</p>{% endif %}
+  {% if meta.source %}<p class="plain">From the <a href="{{ url_for('show_shortlist', run_id=meta.source.shortlist) }}#{{ meta.source.tender_id|anchor }}">BidAssist list of {{ meta.source.shortlist_created }}</a></p>{% endif %}
+  <ol class="steps" aria-label="Progress" style="margin-top:14px">
     {% for st in steps %}<li class="step {{ st.state }}"{% if st.state == 'current' %} aria-current="step"{% endif %}>{{ st.label }}</li>{% endfor %}
   </ol>
-  <div class="next">
-    <p><strong>Next:</strong> {{ next_action.text }}</p>
-    {% if next_action.button %}<a class="btn small" href="{{ next_action.href }}">{{ next_action.button }}</a>{% endif %}
+  <div class="now">
+    <p><strong>What to do now:</strong> {{ next_action.text }}</p>
+    {% if next_action.button %}<a class="btn" href="{{ next_action.href }}">{{ next_action.button }}</a>{% endif %}
   </div>
 </section>
 
 <div id="status"></div>
 {% if msg %}<div class="notice info">{{ msg }}</div>{% endif %}
 {% if status.state == 'running' %}
-<div class="notice running"><strong>Working.</strong> {{ step_text }} This page refreshes by itself.</div>
+<div class="notice running"><strong>Please wait.</strong> {{ step_text }} This page updates by itself.</div>
 {% elif status.state == 'failed' %}
-<div class="notice failed"><strong>The {{ status.step }} step failed:</strong> {{ status.error }}
+<div class="notice failed"><strong>Something went wrong.</strong> {{ status.error }}
   {% if not can_draft or status.step == 'triage' %}
   <form method="post" action="{{ url_for('retriage_bid', bid_id=meta.id) }}" style="margin-top:10px">
-    <select name="provider" style="width:auto">{% for p in providers %}<option value="{{ p }}" {% if p == (meta.provider or default_provider) %}selected{% endif %}>{{ 'Claude (paid)' if p == 'claude' else 'Gemini (free tier)' }}</option>{% endfor %}</select>
-    <button class="btn small" type="submit">Run triage again</button>
+    <input type="hidden" name="provider" value="{{ meta.provider or default_provider }}">
+    <button class="btn small" type="submit">Try again</button>
   </form>
-  {% else %}<div class="meta" style="margin-top:6px">Use Generate response below to try again.</div>{% endif %}
+  {% else %}
+  <form method="post" action="{{ url_for('draft_bid', bid_id=meta.id) }}" style="margin-top:10px">
+    <input type="hidden" name="provider" value="{{ meta.provider or default_provider }}">
+    <button class="btn small" type="submit">Try again</button>
+  </form>
+  {% endif %}
 </div>
 {% endif %}
 
 {% if can_draft %}
 <section class="card" id="decide">
-  <h2>Decision on the card {% if decision %}<span class="state {{ decision|lower }}">Decision: {{ decision }}</span>{% endif %}</h2>
-  <p class="meta" style="margin-top:0">Mahadevan: read the <a href="#card">triage card below</a> (or <a href="{{ url_for('bid_card', bid_id=meta.id) }}" target="_blank">open it in a new tab</a>), then decide. Go unlocks the response pack.</p>
-  <div class="tender-actions">
+  <h2>Do we bid?</h2>
+  {% if decision %}<p><strong>Decision: {{ decision_labels[decision] }}</strong></p>{% endif %}
+  <p class="plain">Mahadevan: read the <a href="#card">AI summary below</a>, then choose.</p>
+  <div class="buttons">
     {% for d in ('Go', 'No-go', 'Ask') %}
     <form class="inline-form" method="post" action="{{ url_for('decide_bid', bid_id=meta.id) }}">
       <input type="hidden" name="decision" value="{{ d }}">
-      <button class="btn small {{ 'chosen' if decision == d else 'secondary' }}" type="submit">{{ d }}</button>
+      <button class="btn {{ 'chosen' if decision == d else 'secondary' }}" type="submit">{{ decision_labels[d] }}</button>
     </form>
     {% endfor %}
-    {% if decision == 'Ask' %}<span class="meta">Ask BD or the buyer the open questions on the card, then decide again.</span>{% endif %}
   </div>
-  {% if reply.state == 'waiting' %}<p class="meta">Reply to BD: waiting for the response pack, then it is drafted in your Outlook with the pack attached.</p>
-  {% elif reply.state == 'due' %}<p class="meta">Reply to BD: ready. The mail watcher will put it in your Outlook Drafts (start <code>mailwatch.ps1</code> if it is not running).</p>
-  {% elif reply.state == 'drafted' %}<p><span class="state done">Reply drafted</span> <span class="meta">in your Outlook Drafts on {{ reply.drafted_at }} ({{ reply.decision }}). Check it and press Send.</span></p>
-  {% elif reply.state == 'none' and mail %}<p class="meta">After the decision, a reply to BD is drafted in your Outlook (never sent automatically).</p>{% endif %}
+  {% if decision == 'Ask' %}<p class="plain">Ask BD or the buyer the questions in the summary, then choose again.</p>{% endif %}
+  {% if reply.state == 'waiting' %}<p class="plain">Reply to BD: will be ready in Outlook Drafts once the reply documents are made.</p>
+  {% elif reply.state == 'due' %}<p class="plain">Reply to BD: going into your Outlook Drafts in a minute.</p>
+  {% elif reply.state == 'drafted' %}<p><strong>Reply is in your Outlook Drafts</strong> <span class="plain">({{ reply.drafted_at }}). Check it and press Send.</span></p>
+  {% elif reply.state == 'none' and mail %}<p class="plain">After you choose, a reply to BD appears in your Outlook Drafts. Nothing is sent by itself.</p>{% endif %}
 </section>
 
 <section class="card" id="response">
-  <h2>Response pack {% if files %}<span class="count">{{ files|length }} files</span>{% endif %}</h2>
+  <h2>Reply documents</h2>
   {% if files %}
-  <div class="tablewrap"><table>
-    <tr><th>File</th><th>To complete</th><th>Who / what</th><th></th></tr>
-    {% for f in files %}
-    <tr>
-      <td>{{ f.name }}</td>
-      <td>{% if f.count is none %}—{% elif f.name.endswith('.xlsx') %}{{ f.count }} lines to price{% else %}{{ f.count }} placeholders{% endif %}</td>
-      <td class="src">{{ f.note }}</td>
-      <td>{% if f.exists %}<a class="btn small secondary" href="{{ url_for('bid_file', bid_id=meta.id, name=f.name) }}">Download</a>{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table></div>
-  <p style="margin:14px 0 0"><a class="btn" href="{{ url_for('bid_zip', bid_id=meta.id) }}">Download all (.zip)</a></p>
+  {% for f in files %}
+  <div class="row-item">
+    <div class="main"><strong>{{ f.name }}</strong>
+      <div class="status">{% if f.count is not none %}{% if f.name.endswith('.xlsx') %}{{ f.count }} prices to fill{% else %}{{ f.count }} yellow gaps{% endif %} · {% endif %}{{ f.note }}</div></div>
+    {% if f.exists %}<a class="btn small secondary" href="{{ url_for('bid_file', bid_id=meta.id, name=f.name) }}">Download</a>{% endif %}
+  </div>
+  {% endfor %}
+  <div class="buttons"><a class="btn" href="{{ url_for('bid_zip', bid_id=meta.id) }}">Download all</a></div>
   {% elif decision == 'No-go' %}
-  <p class="meta" style="margin-top:0">Decision is No-go, so no response is needed. You can still generate one below.</p>
+  <p class="plain">Decision is No, so no reply documents are needed.</p>
   {% elif decision != 'Go' %}
-  <p class="meta" style="margin-top:0">Usually generated after a Go decision above.</p>
+  <p class="plain">These are made after “Yes, bid”.</p>
   {% endif %}
-  <form method="post" action="{{ url_for('draft_bid', bid_id=meta.id) }}" style="margin-top:16px">
-    <div class="row">
-      <div>{{ provider_select(meta.provider) }}</div>
-      <div style="flex:0"><button class="btn {{ '' if decision == 'Go' and not files else 'secondary' }}" type="submit" {% if status.state == 'running' %}disabled{% endif %}>{{ 'Regenerate response' if files else 'Generate response' }}</button></div>
-    </div>
-    <p class="meta">Drafts the technical compliance, buyer's compliance form, price sheet (no prices), declarations, pre-bid queries and checklist. Everything a person must decide is a yellow [[placeholder]].</p>
-  </form>
-  {% if has_saved_draft %}
-  <form method="post" action="{{ url_for('rebuild_bid', bid_id=meta.id) }}" style="margin-top:4px">
-    <button class="btn small secondary" type="submit" {% if status.state == 'running' %}disabled{% endif %}>Rebuild documents from the saved draft</button>
-    <span class="meta">No new AI call: use this after editing the company profile, or if writing the files failed.</span>
+  {% if not files %}
+  <form method="post" action="{{ url_for('draft_bid', bid_id=meta.id) }}">
+    <input type="hidden" name="provider" value="{{ meta.provider or default_provider }}">
+    <div class="buttons"><button class="btn {{ '' if decision == 'Go' else 'secondary' }}" type="submit" {% if status.state == 'running' %}disabled{% endif %}>Make reply documents</button></div>
   </form>
   {% endif %}
+  <details class="more"><summary>More options</summary>
+    <form method="post" action="{{ url_for('draft_bid', bid_id=meta.id) }}">
+      {{ provider_select(meta.provider) }}
+      <div class="buttons"><button class="btn small secondary" type="submit" {% if status.state == 'running' %}disabled{% endif %}>{{ 'Make the documents again with AI' if files else 'Make reply documents with this AI' }}</button></div>
+    </form>
+    {% if has_saved_draft %}
+    <form method="post" action="{{ url_for('rebuild_bid', bid_id=meta.id) }}">
+      <div class="buttons"><button class="btn small secondary" type="submit" {% if status.state == 'running' %}disabled{% endif %}>Remake documents</button>
+      <span class="status">No AI: use after changing the company details.</span></div>
+    </form>
+    {% endif %}
+    <form method="post" action="{{ url_for('retriage_bid', bid_id=meta.id) }}">
+      {{ provider_select(meta.provider) }}
+      <div class="buttons"><button class="btn small secondary" type="submit" {% if status.state == 'running' %}disabled{% endif %}>Write the AI summary again</button></div>
+    </form>
+  </details>
 </section>
 {% endif %}
 
 {% if has_card %}
 <section class="card" id="card">
-  <h2>Triage card <a class="btn small secondary" href="{{ url_for('bid_card', bid_id=meta.id) }}" target="_blank">Open in new tab</a> <a class="btn small secondary" href="#decide">Back to decision</a></h2>
-  <iframe src="{{ url_for('bid_card', bid_id=meta.id) }}" title="Triage card"></iframe>
+  <h2>AI summary <a class="btn small secondary" href="{{ url_for('bid_card', bid_id=meta.id) }}" target="_blank">Open full screen</a></h2>
+  <iframe src="{{ url_for('bid_card', bid_id=meta.id) }}" title="AI summary"></iframe>
+  <div class="buttons"><a class="btn secondary" href="#decide">Back to “Do we bid?”</a></div>
 </section>
 {% endif %}
 {% endblock %}

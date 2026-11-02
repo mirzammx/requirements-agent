@@ -26,6 +26,7 @@ import draft
 import shortlist
 import triage
 from bidtriage.email_loader import load_bid
+from bidtriage.gem import GemError, bid_numbers_in_pdf, fetch_gem_document
 from bidtriage.intake import classify_mail, load_intake_settings
 from bidtriage.render import CSS
 from bidtriage.reply import build_reply
@@ -35,21 +36,22 @@ from bidtriage.web import jobs
 
 ROOT = Path(__file__).resolve().parent
 ID_RE = re.compile(r"^\d{8}-[0-9a-f]{6}$")
-TENDER_ACTIONS = ("Fetch", "Skip")          # BD, on the shortlist
+TENDER_ACTIONS = ("Fetch", "Skip", "Clear")  # BD, on the shortlist (Clear = undo)
 BID_DECISIONS = ("Go", "No-go", "Ask")       # Mahadevan, on the triage card
 CANDIDATE_CATEGORIES = ("sbu2_power", "manual_check")
 EMAIL_SUFFIXES = {".msg", ".eml"}
 STEP_TEXT = {
-    "triage": "Reading the documents and writing the triage card (usually 1–2 minutes)…",
-    "draft": "Drafting the response pack (about 5–10 minutes on Gemini)…",
-    "shortlist": "Screening the tenders (a few minutes for 100 tenders)…",
+    "triage": "The AI is reading the RFQ and writing a summary (about 1–2 minutes)…",
+    "draft": "Making the reply documents (about 5–10 minutes)…",
+    "shortlist": "Sorting the BidAssist list (a few minutes)…",
 }
-FILE_NOTES = {"Technical_Compliance.docx": "Mahadevan: resolve every yellow REVIEW / DEVIATION",
-              "Compliance_Statement.docx": "Buyer's compliance form",
-              "Price_Bid.xlsx": "BD: enter unit prices and GST % in the yellow cells",
+FILE_NOTES = {"Technical_Compliance.docx": "Mahadevan fills the yellow gaps",
+              "Compliance_Statement.docx": "The buyer's form: check it, fill the gaps",
+              "Price_Bid.xlsx": "BD types the prices in the yellow cells",
               "Declarations.docx": "Print on letterhead and sign",
-              "PreBid_Queries.docx": "Clarification letter to the buyer",
-              "Checklist.md": "Every document the RFQ requires"}
+              "PreBid_Queries.docx": "Questions to send the buyer",
+              "Checklist.md": "List of everything to send"}
+DECISION_LABELS = {"Go": "Yes, bid", "No-go": "No", "Ask": "Need more info"}
 
 
 def _unique_name(original: str, taken: set[str]) -> str:
@@ -112,7 +114,8 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
 
     @app.context_processor
     def common():
-        return {"css": CSS + EXTRA_CSS, "providers": ("claude", "gemini"), "default_provider": _default_provider()}
+        return {"css": CSS + EXTRA_CSS, "providers": ("claude", "gemini"), "default_provider": _default_provider(),
+                "decision_labels": DECISION_LABELS}
 
     # ---------------------------------------------------------------- data helpers
 
@@ -189,39 +192,39 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
                     continue  # closed: nothing to do
                 choice = decisions.get(t["tender_id"])
                 if not choice:
-                    actions.append({"who": "BD", "what": "Fetch documents or skip", "title": t["summary"],
+                    actions.append({"who": "BD", "what": "Check or skip", "title": t["summary"],
                                     "detail": f"{t['authority']} · {_closes(t)}",
                                     "href": url_for("show_shortlist", run_id=run["id"]) + "#" + _anchor(t["tender_id"]),
-                                    "button": "Open shortlist"})
+                                    "button": "Open list"})
                 elif choice == "Fetch" and t["tender_id"] not in started:
-                    actions.append({"who": "BD", "what": "Start the bid", "title": t["summary"],
-                                    "detail": f"{t['authority']} · {_closes(t)} · upload the RFQ documents",
+                    actions.append({"who": "BD", "what": "Upload the RFQ", "title": t["summary"],
+                                    "detail": f"{t['authority']} · {_closes(t)}",
                                     "href": url_for("new_bid", shortlist=run["id"], tender=t["tender_id"]),
-                                    "button": "Start bid"})
+                                    "button": "Upload"})
         for s in all_bids():
             m, st = s["meta"], s["status"].get("state")
             href = url_for("show_bid", bid_id=m["id"])
             if st == "running":
                 actions.append({"who": "Wait", "what": STEP_TEXT.get(s["status"].get("step", ""), "Working…"),
-                                "title": m["title"], "detail": "", "href": href, "button": "Open bid"})
+                                "title": m["title"], "detail": "", "href": href, "button": "Open"})
             elif st == "failed":
-                actions.append({"who": "Retry", "what": f"The {s['status'].get('step')} step failed",
+                actions.append({"who": "Problem", "what": "Something went wrong",
                                 "title": m["title"], "detail": s["status"].get("error", ""), "href": href,
-                                "button": "Open bid"})
+                                "button": "Open"})
             elif s["can_draft"] and not s["decision"]:
-                actions.append({"who": "Mahadevan", "what": "Go / No-go on the card", "title": m["title"],
-                                "detail": "Triage card ready", "href": href + "#decide", "button": "Read card"})
+                actions.append({"who": "Mahadevan", "what": "Decide: bid or not", "title": m["title"],
+                                "detail": "AI summary is ready", "href": href + "#decide", "button": "Read summary"})
             elif s["decision"] == "Go" and not s["has_files"]:
-                actions.append({"who": "BD", "what": "Generate the response", "title": m["title"],
-                                "detail": "Decision: Go", "href": href + "#response", "button": "Open bid"})
+                actions.append({"who": "BD", "what": "Make the reply documents", "title": m["title"],
+                                "detail": "Decision: Yes, bid", "href": href + "#response", "button": "Open"})
             elif s["reply"]["state"] == "due":
-                actions.append({"who": "You", "what": "Reply to BD is ready to draft", "title": m["title"],
-                                "detail": "Start the mail watcher (mailwatch.ps1) so it lands in your Outlook Drafts",
-                                "href": href + "#decide", "button": "Open bid"})
+                actions.append({"who": "You", "what": "Reply is ready for Outlook", "title": m["title"],
+                                "detail": "The mail helper will put it in your Outlook Drafts (start it if it is not running)",
+                                "href": href + "#decide", "button": "Open"})
             elif s["reply"]["state"] == "drafted" and _within_days(s["reply"].get("drafted_at", ""), 3):
-                actions.append({"who": "You", "what": "Check and send the reply from Outlook Drafts",
-                                "title": m["title"], "detail": f"Drafted {s['reply']['drafted_at']} "
-                                f"({s['reply']['decision']})", "href": href + "#decide", "button": "Open bid"})
+                actions.append({"who": "You", "what": "Send the reply from Outlook Drafts",
+                                "title": m["title"], "detail": f"Put in Drafts on {s['reply']['drafted_at']}",
+                                "href": href + "#decide", "button": "Open"})
         return actions
 
     def provider_arg() -> str:
@@ -260,7 +263,7 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
                     "body": (f"Tender: {tender.get('tender_no') or tender['tender_id']}\n"
                              f"Authority: {tender['authority']}\nLocation: {tender.get('location', '')}\n"
                              f"Closes: {tender.get('closing_date', '')}\nValue: {tender.get('amount') or '-'}\n"
-                             f"From the BidAssist shortlist; BD fetched the documents.")}
+                             f"Picked by BD from the BidAssist list.")}
         return render_template("bid_new.html", active="new", samples=samples(), error=error, form=form,
                                tender=tender, run_id=run_id if tender else "",
                                run_meta=_read_json(lists_dir / run_id / "meta.json", {}) if tender else {}), status
@@ -274,15 +277,29 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         files = [f for f in request.files.getlist("files") if f and f.filename]
         subject, body = request.form.get("subject", "").strip(), request.form.get("body", "").strip()
         run_id, tender_id = request.form.get("shortlist", ""), request.form.get("tender", "")
-        form = {"subject": subject, "body": body}
+        gem_link = request.form.get("gem_link", "").strip()
+        form = {"subject": subject, "body": body, "gem_link": gem_link}
         if sample and sample not in samples():
             abort(400)
         if (run_id or tender_id) and not tender_from(run_id, tender_id):
             abort(400)
-        if not sample and not files:
-            return new_bid("Add the bid documents (email .msg/.eml, PDFs, Excel) or pick a sample folder.", 400, form)
+        if not sample and not files and not gem_link:
+            return new_bid("Add the RFQ files (PDF, Excel or the email .msg), or paste a GeM document link.", 400, form)
         if sum(Path(f.filename).suffix.lower() in EMAIL_SUFFIXES for f in files) > 1:
             return new_bid("Upload one email file (.msg or .eml) per bid; add its documents alongside it.", 400, form)
+
+        gem_pdf = None
+        if gem_link:
+            try:
+                gem_pdf = fetch_gem_document(gem_link)
+            except GemError as exc:
+                return new_bid(str(exc), 400, form)
+            # GeM links use an internal number, not the bid number: make sure this is the right tender.
+            expected = tender_id if re.fullmatch(r"GEM/\d{4}/B/\d+", tender_id or "") else ""
+            found = bid_numbers_in_pdf(gem_pdf)
+            if expected and found and expected not in found:
+                return new_bid(f"This GeM document is for {found[0]}, not {expected}. Check that you copied the "
+                               "link of the right bid.", 400, form)
 
         bid_id = _new_id()
         bid = bids_dir / bid_id
@@ -290,9 +307,13 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         inp.mkdir(parents=True)
         if sample:
             shutil.copytree(Path(samples_dir) / sample, inp, dirs_exist_ok=True)
+        if gem_pdf:
+            (inp / "GeM_bid_document.pdf").write_bytes(gem_pdf)
         has_email = any(Path(f.filename).suffix.lower() in EMAIL_SUFFIXES for f in files)
         typed = (subject or body) and not has_email
         taken = {p.name for p in inp.iterdir()} | ({"email.txt"} if typed else set())
+        if run_id:
+            _set_tender_decision(lists_dir / run_id, tender_id, "Fetch")  # BD chose to check this tender
         for f in files:
             name = _unique_name(f.filename, taken)
             taken.add(name)
@@ -564,16 +585,7 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         tender_id, decision = request.form.get("tender_id", ""), request.form.get("decision", "")
         if decision not in TENDER_ACTIONS or tender_id not in {i["tender_id"] for i in shortlist_items(run)}:
             abort(400)
-        msg = ""
-        with DECISION_LOCK:  # two quick clicks must not lose a decision or interleave workbook saves
-            decisions = _read_json(run / "decisions.json", {})
-            decisions[tender_id] = decision
-            _atomic_write_text(run / "decisions.json", json.dumps(decisions, indent=2))
-            try:
-                _write_decision_to_xlsx(run / "result" / "shortlist.xlsx", tender_id, decision)
-            except Exception:
-                msg = ("Saved, but shortlist.xlsx could not be updated (is it open in Excel?). "
-                       "Close it and click again to copy it into the workbook.")
+        msg = _set_tender_decision(run, tender_id, decision)
         return redirect(url_for("show_shortlist", run_id=run_id, msg=msg) + "#" + _anchor(tender_id))
 
     @app.get("/shortlists/<run_id>/files/<name>")
@@ -594,10 +606,10 @@ def _bid_steps(s: dict) -> tuple[list[dict], dict]:
     step = s["status"].get("step")
     raw = [
         ("Documents", True),
-        ("Triage card", s["can_draft"]),
-        ("Decide on the card", bool(s["decision"])),
-        ("Response pack", s["has_files"]),
-        ("Download the pack", False),
+        ("AI summary", s["can_draft"]),
+        ("Decision", bool(s["decision"])),
+        ("Reply documents", s["has_files"]),
+        ("Done", False),
     ]
     current = next((i for i, (_, done) in enumerate(raw) if not done), len(raw) - 1)
     if s["has_files"]:
@@ -607,18 +619,17 @@ def _bid_steps(s: dict) -> tuple[list[dict], dict]:
     if running:
         nxt = {"text": STEP_TEXT.get(step, "Working…"), "href": "", "button": ""}
     elif failed:
-        nxt = {"text": f"The {step} step failed. Try it again below.", "href": "#status", "button": "See the error"}
+        nxt = {"text": "Something went wrong. Press Try again below.", "href": "#status", "button": "See what happened"}
     elif current == 2:
-        nxt = {"text": "Mahadevan: read the triage card and decide Go / No-go / Ask.", "href": "#decide",
+        nxt = {"text": "Mahadevan: Read the AI summary and decide: bid or not.", "href": "#decide",
                "button": "Decide"}
     elif current == 3:
-        nxt = {"text": "Generate the response pack (usually after a Go).", "href": "#response",
-               "button": "Generate response"}
+        nxt = {"text": "Make the reply documents.", "href": "#response", "button": "Make reply documents"}
     elif current == 4:
-        nxt = {"text": "Download the pack, complete the yellow placeholders, price and submit.",
+        nxt = {"text": "Download the reply documents, fill the yellow gaps and prices, then send.",
                "href": "#response", "button": "Go to downloads"}
     else:
-        nxt = {"text": "Waiting for the triage card.", "href": "", "button": ""}
+        nxt = {"text": "Waiting for the AI summary.", "href": "", "button": ""}
     return steps, nxt
 
 
@@ -680,6 +691,24 @@ def _closes(t: dict) -> str:
 
 
 DECISION_LOCK = threading.Lock()
+
+
+def _set_tender_decision(run: Path, tender_id: str, decision: str) -> str:
+    """Save BD's choice for a shortlist tender (Clear = undo). Returns a message if Excel couldn't be updated."""
+    with DECISION_LOCK:  # two quick clicks must not lose a decision or interleave workbook saves
+        decisions = _read_json(run / "decisions.json", {})
+        if decision == "Clear":
+            decisions.pop(tender_id, None)
+        else:
+            decisions[tender_id] = decision
+        _atomic_write_text(run / "decisions.json", json.dumps(decisions, indent=2))
+        try:
+            _write_decision_to_xlsx(run / "result" / "shortlist.xlsx", tender_id,
+                                    None if decision == "Clear" else decision)
+        except Exception:
+            return ("Saved, but shortlist.xlsx could not be updated (is it open in Excel?). "
+                    "Close it and click again to copy it into the workbook.")
+    return ""
 
 
 def _atomic_write_text(path: Path, text: str) -> None:

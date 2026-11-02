@@ -1,7 +1,7 @@
 {% macro provider_select(selected=None) %}
-<label>AI model</label>
+<label>AI to use</label>
 <select name="provider">
-  {% for p in providers %}<option value="{{ p }}" {% if p == (selected or default_provider) %}selected{% endif %}>{{ 'Claude (paid)' if p == 'claude' else 'Gemini (free tier, testing only)' }}</option>{% endfor %}
+  {% for p in providers %}<option value="{{ p }}" {% if p == (selected or default_provider) %}selected{% endif %}>{{ 'Claude (paid)' if p == 'claude' else 'Gemini (free, for testing)' }}</option>{% endfor %}
 </select>
 {% endmacro %}
 
@@ -11,19 +11,20 @@
 </nav>
 {% endmacro %}
 
-{% macro bid_badge(s) %}
-{% if s.status.state == 'running' %}<span class="state running">{{ s.status.step }} running</span>
-{% elif s.status.state == 'failed' %}<span class="state failed">{{ s.status.step }} failed</span>
-{% elif s.decision %}<span class="state {{ s.decision|lower }}">{{ s.decision }}</span>{% endif %}
-{% if s.has_files %}<span class="state done">pack ready</span>{% elif s.can_draft and not s.decision %}<span class="state">card ready</span>{% endif %}
-{% endmacro %}
+{% macro status_text(s) -%}
+{% if s.status.state == 'running' %}AI is working…
+{%- elif s.status.state == 'failed' %}Something went wrong
+{%- elif s.has_files %}Reply documents ready
+{%- elif s.decision %}Decided: {{ decision_labels[s.decision] }}
+{%- elif s.can_draft %}Waiting for decision
+{%- else %}Getting started{% endif %}
+{%- endmacro %}
 
-{% macro screen_form(compact=False) %}
+{% macro list_form() %}
 <form method="post" action="{{ url_for('create_shortlist') }}" enctype="multipart/form-data">
-  <div class="row">
-    <div><label>BidAssist "Tender List" .xlsx files</label><input type="file" name="files" accept=".xlsx" multiple></div>
-    <div>{{ provider_select() }}</div>
-    <div style="flex:0"><button class="btn" type="submit">Screen</button></div>
-  </div>
+  <label for="list-files">BidAssist Excel file <span class="hint">(the "Power supply - Tender List" file from the BidAssist email)</span></label>
+  <input id="list-files" type="file" name="files" accept=".xlsx" multiple>
+  <details class="more"><summary>More options</summary>{{ provider_select() }}</details>
+  <div class="buttons"><button class="btn" type="submit">Sort this list</button></div>
 </form>
 {% endmacro %}
