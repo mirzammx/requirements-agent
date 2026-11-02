@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import crumbs, provider_select %}
+{% from "_macros.html" import crumbs, provider_select with context %}
 {% block title %}Add tender{% endblock %}
 {% block crumbs %}
 {% if tender %}{{ crumbs([("Home", url_for('index')), ("BidAssist lists", url_for('list_shortlists')), ("List of " ~ run_meta.created, url_for('show_shortlist', run_id=run_id)), ("Add tender", None)]) }}

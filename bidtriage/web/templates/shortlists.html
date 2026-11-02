@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import crumbs, list_form %}
+{% from "_macros.html" import crumbs, list_form with context %}
 {% block title %}BidAssist lists{% endblock %}
 {% block crumbs %}{{ crumbs([("Home", url_for('index')), ("BidAssist lists", None)]) }}{% endblock %}
 {% block content %}

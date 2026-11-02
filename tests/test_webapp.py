@@ -625,6 +625,14 @@ def test_lists_saved_before_detail_urls_get_them_from_their_excel(env):
     assert json.loads(saved.read_text())[0]["detail_url"].endswith("/9945635")
 
 
+def test_ai_choice_is_offered_on_every_form(env):
+    client, _ = env
+    url = _new_bid(client)
+    client.post(url + "/decide", data={"decision": "Go"})
+    for page in ("/", "/shortlists", "/bids/new", url):
+        assert '<option value="gemini"' in client.get(page).get_data(as_text=True), page
+
+
 def test_gem_download_failure_falls_back_to_the_form(env, monkeypatch):
     client, _ = env
 
