@@ -12,7 +12,8 @@ from io import BytesIO
 import httpx
 
 GEM_LINK = re.compile(r"^https://bidplus\.gem\.gov\.in/showbidDocument/\d+$")
-GEM_PAGE = re.compile(r"^https://bidplus\.gem\.gov\.in/(?:bidding/bid/getBidResultView|showbidDocument)/(\d+)$")
+# getBidResultView, getBidResultViewSchedule, getSinglePacketResultView, ... all end in the document number.
+GEM_PAGE = re.compile(r"^https://bidplus\.gem\.gov\.in/(?:bidding/bid/[A-Za-z]+|showbidDocument)/(\d+)$")
 BID_NUMBER = re.compile(r"GEM/\d{4}/B/\d+")
 MAX_BYTES = 30 * 1024 * 1024
 USER_AGENT = "RugRel-BidDesk/1.0 (single document download for bid evaluation)"

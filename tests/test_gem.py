@@ -11,6 +11,12 @@ def test_document_link_from_bidassist_detail_url():
     assert gem_document_link("https://bidplus.gem.gov.in/bidding/bid/getBidResultView/9945635") \
         == "https://bidplus.gem.gov.in/showbidDocument/9945635"
     assert gem_document_link("https://bidplus.gem.gov.in/showbidDocument/12") == "https://bidplus.gem.gov.in/showbidDocument/12"
+    # bids with schedules and single-packet bids use other page names but the same document number
+    assert gem_document_link("https://bidplus.gem.gov.in/bidding/bid/getBidResultViewSchedule/9992203") \
+        == "https://bidplus.gem.gov.in/showbidDocument/9992203"
+    assert gem_document_link("https://bidplus.gem.gov.in/bidding/bid/getSinglePacketResultView/9990506") \
+        == "https://bidplus.gem.gov.in/showbidDocument/9990506"
+    assert gem_document_link("https://bidplus.gem.gov.in/bidding/bid/../x/9990506") == ""
     assert gem_document_link("https://defproc.gov.in/nicgep/app?page=FrontEndViewTender") == ""
     assert gem_document_link("https://evil.example/bidding/bid/getBidResultView/9945635") == ""
     assert gem_document_link("") == ""
