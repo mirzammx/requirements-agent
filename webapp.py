@@ -80,7 +80,8 @@ def _read_json(path: Path, default):
 TODO_GROUPS = [
     {"id": "problem", "title": "Something went wrong", "who": "Problem", "hint": "Open it and press Try again."},
     {"id": "check", "title": "Check or skip", "who": "BD", "hint": "New tenders from BidAssist: get the RFQ, or skip."},
-    {"id": "rfq", "title": "Upload the RFQ", "who": "BD", "hint": "Chosen tenders still waiting for their RFQ files."},
+    {"id": "rfq", "title": "Get the RFQ", "who": "BD",
+     "hint": "GeM tenders: one click downloads the RFQ. Other sites: download it there, then upload it."},
     {"id": "decide", "title": "Decide: bid or not", "who": "Mahadevan", "hint": "The AI summary is ready to read."},
     {"id": "documents", "title": "Make reply documents", "who": "BD", "hint": "Decision was Yes, bid."},
     {"id": "send", "title": "Send the reply", "who": "You", "hint": "The reply to BD is in (or going to) your Outlook Drafts."},
@@ -212,10 +213,14 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
                                     "href": url_for("show_shortlist", run_id=run["id"]) + "#" + _anchor(t["tender_id"]),
                                     "button": "Open list"})
                 elif choice == "Fetch" and t["tender_id"] not in started:
-                    actions.append({"group": "rfq", "who": "BD", "what": "Upload the RFQ", "title": t["summary"],
-                                    "detail": f"{t['authority']} · {_closes(t)}",
+                    on_gem = bool(gem_document_link(t.get("detail_url", "")))
+                    actions.append({"group": "rfq", "who": "BD", "what": "Get the RFQ", "title": t["summary"],
+                                    "detail": f"{t['authority']} · {_closes(t)}"
+                                              + ("" if on_gem else " · not on GeM: download it from the tender site"),
                                     "href": url_for("new_bid", shortlist=run["id"], tender=t["tender_id"]),
-                                    "button": "Upload"})
+                                    "button": "Get RFQ & check" if on_gem else "Upload",
+                                    # GeM: one click downloads the document and starts the AI summary
+                                    "post": {"shortlist": run["id"], "tender": t["tender_id"]} if on_gem else None})
         for s in all_bids():
             m, st = s["meta"], s["status"].get("state")
             href = url_for("show_bid", bid_id=m["id"])

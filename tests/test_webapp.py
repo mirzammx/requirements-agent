@@ -343,7 +343,9 @@ def test_overview_lists_what_needs_action(env):
     assert "Variable SMPS" in html and "Check or skip" in html
     client.post(sl + "/decide", data={"tender_id": "GEM/2026/B/8082649", "decision": "Fetch"})
     html = client.get("/").get_data(as_text=True)
-    assert "Upload the RFQ" in html
+    assert "Get the RFQ" in html
+    # a GeM tender is fetched with one click from Home, not sent to the upload form
+    assert 'value="GEM/2026/B/8082649"' in html and 'action="/bids"' in html and "/bids/new?shortlist" not in html
     _new_bid(client, subject="HAL AHRU card")
     html = client.get("/").get_data(as_text=True)
     assert "HAL AHRU card" in html and "Decide: bid or not" in html

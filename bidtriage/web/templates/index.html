@@ -13,9 +13,14 @@
       <tbody>
       {% for a in g.rows %}
       <tr>
-        <td><a href="{{ a.href }}">{{ a.title }}</a></td>
+        <td>{% if a.post %}{{ a.title }}{% else %}<a href="{{ a.href }}">{{ a.title }}</a>{% endif %}</td>
         <td class="status">{% if g.id in ('send', 'wait') %}{{ a.what }}{% if a.detail %} · {% endif %}{% endif %}{{ a.detail }}</td>
-        <td class="go"><a class="btn small{{ '' if g.id != 'wait' else ' secondary' }}" href="{{ a.href }}">{{ a.button }}</a></td>
+        <td class="go">{% if a.post %}
+          <form class="inline-form" method="post" action="{{ url_for('create_bid') }}">
+            {% for k, v in a.post.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+            <button class="btn small" type="submit">{{ a.button }}</button>
+          </form>
+          {% else %}<a class="btn small{{ '' if g.id != 'wait' else ' secondary' }}" href="{{ a.href }}">{{ a.button }}</a>{% endif %}</td>
       </tr>
       {% endfor %}
       </tbody>
