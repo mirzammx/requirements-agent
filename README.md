@@ -37,6 +37,11 @@ GeM tenders: the BidAssist Excel's "Tender Detail Url" gives the GeM bid's inter
 
 Long steps run in the background; the page shows "Working…" and refreshes itself. Everything is stored under `data/` (git-ignored). The app is reachable from this PC only (port 8010, because 8000 is used by another local app).
 
+### On Azure
+
+`deploy-azure.ps1` puts the app on Azure App Service (Linux B1, Central India) behind company Microsoft sign-in: the image is built here by Docker and pushed to a container registry, tender data lives on an Azure Files share, and everything else is the template `infra/azuredeploy.json`. Run `az login` first; run the script again to deploy an update. The mail watcher's three `/api/` paths skip sign-in and need the secret key instead (`BIDDESK_URL` and `BIDDESK_API_KEY` are set for your Windows user by the script).
+
+On this PC, Smart App Control blocks the Azure CLI's `webapp` and `storage` commands (and its Windows login broker: `az config set core.enable_broker_on_windows=false`), which is why the script uses `az deployment` and `az rest` instead. The subscription's role-assignment policy doesn't allow granting AcrPull, so the app pulls its image with the registry's admin login.
 ### Straight from Outlook (mail watcher)
 
 ```powershell

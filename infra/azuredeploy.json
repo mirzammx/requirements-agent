@@ -1,0 +1,234 @@
+{
+    "$schema":  "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion":  "1.0.0.0",
+    "metadata":  {
+                     "description":  "Bid desk on App Service (Linux B1): container from our registry (registry admin login: this subscription does not allow us to grant AcrPull), data/ on Azure Files, company sign-in with the mail watcher\u0027s /api paths left to its own key. Deployed by deploy-azure.ps1."
+                 },
+    "parameters":  {
+                       "location":  {
+                                        "type":  "string"
+                                    },
+                       "appName":  {
+                                       "type":  "string"
+                                   },
+                       "planName":  {
+                                        "type":  "string"
+                                    },
+                       "registryName":  {
+                                            "type":  "string"
+                                        },
+                       "storageName":  {
+                                           "type":  "string"
+                                       },
+                       "shareName":  {
+                                         "type":  "string",
+                                         "defaultValue":  "biddesk-data"
+                                     },
+                       "image":  {
+                                     "type":  "string"
+                                 },
+                       "tenantId":  {
+                                        "type":  "string"
+                                    },
+                       "authClientId":  {
+                                            "type":  "string"
+                                        },
+                       "authClientSecret":  {
+                                                "type":  "securestring"
+                                            },
+                       "apiKey":  {
+                                      "type":  "securestring"
+                                  },
+                       "geminiApiKey":  {
+                                            "type":  "securestring",
+                                            "defaultValue":  ""
+                                        },
+                       "anthropicApiKey":  {
+                                               "type":  "securestring",
+                                               "defaultValue":  ""
+                                           }
+                   },
+    "variables":  {
+                      "hostName":  "[concat(parameters(\u0027appName\u0027), \u0027.azurewebsites.net\u0027)]"
+                  },
+    "resources":  [
+                      {
+                          "type":  "Microsoft.Storage/storageAccounts",
+                          "apiVersion":  "2023-05-01",
+                          "name":  "[parameters(\u0027storageName\u0027)]",
+                          "location":  "[parameters(\u0027location\u0027)]",
+                          "sku":  {
+                                      "name":  "Standard_LRS"
+                                  },
+                          "kind":  "StorageV2",
+                          "properties":  {
+                                             "minimumTlsVersion":  "TLS1_2",
+                                             "allowBlobPublicAccess":  false,
+                                             "supportsHttpsTrafficOnly":  true
+                                         }
+                      },
+                      {
+                          "type":  "Microsoft.Storage/storageAccounts/fileServices/shares",
+                          "apiVersion":  "2023-05-01",
+                          "name":  "[concat(parameters(\u0027storageName\u0027), \u0027/default/\u0027, parameters(\u0027shareName\u0027))]",
+                          "dependsOn":  [
+                                            "[resourceId(\u0027Microsoft.Storage/storageAccounts\u0027, parameters(\u0027storageName\u0027))]"
+                                        ],
+                          "properties":  {
+                                             "shareQuota":  100
+                                         }
+                      },
+                      {
+                          "type":  "Microsoft.Web/serverfarms",
+                          "apiVersion":  "2023-12-01",
+                          "name":  "[parameters(\u0027planName\u0027)]",
+                          "location":  "[parameters(\u0027location\u0027)]",
+                          "sku":  {
+                                      "name":  "B1",
+                                      "tier":  "Basic"
+                                  },
+                          "kind":  "linux",
+                          "properties":  {
+                                             "reserved":  true
+                                         }
+                      },
+                      {
+                          "type":  "Microsoft.Web/sites",
+                          "apiVersion":  "2023-12-01",
+                          "name":  "[parameters(\u0027appName\u0027)]",
+                          "location":  "[parameters(\u0027location\u0027)]",
+                          "kind":  "app,linux,container",
+                          "identity":  {
+                                           "type":  "SystemAssigned"
+                                       },
+                          "dependsOn":  [
+                                            "[resourceId(\u0027Microsoft.Web/serverfarms\u0027, parameters(\u0027planName\u0027))]",
+                                            "[resourceId(\u0027Microsoft.Storage/storageAccounts/fileServices/shares\u0027, parameters(\u0027storageName\u0027), \u0027default\u0027, parameters(\u0027shareName\u0027))]"
+                                        ],
+                          "properties":  {
+                                             "serverFarmId":  "[resourceId(\u0027Microsoft.Web/serverfarms\u0027, parameters(\u0027planName\u0027))]",
+                                             "httpsOnly":  true,
+                                             "siteConfig":  {
+                                                                "linuxFxVersion":  "[concat(\u0027DOCKER|\u0027, parameters(\u0027image\u0027))]",
+                                                                "acrUseManagedIdentityCreds":  false,
+                                                                "alwaysOn":  true,
+                                                                "ftpsState":  "Disabled",
+                                                                "minTlsVersion":  "1.2",
+                                                                "http20Enabled":  true,
+                                                                "appSettings":  [
+                                                                                    {
+                                                                                        "name":  "WEBSITES_PORT",
+                                                                                        "value":  "8000"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "WEBSITES_CONTAINER_START_TIME_LIMIT",
+                                                                                        "value":  "600"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "TZ",
+                                                                                        "value":  "Asia/Kolkata"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "BIDDESK_DATA_DIR",
+                                                                                        "value":  "/app/data"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "BIDDESK_ALLOWED_HOSTS",
+                                                                                        "value":  "[variables(\u0027hostName\u0027)]"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "BIDDESK_API_KEY",
+                                                                                        "value":  "[parameters(\u0027apiKey\u0027)]"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "GEMINI_API_KEY",
+                                                                                        "value":  "[parameters(\u0027geminiApiKey\u0027)]"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "ANTHROPIC_API_KEY",
+                                                                                        "value":  "[parameters(\u0027anthropicApiKey\u0027)]"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET",
+                                                                                        "value":  "[parameters(\u0027authClientSecret\u0027)]"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "DOCKER_REGISTRY_SERVER_URL",
+                                                                                        "value":  "[concat(\u0027https://\u0027, parameters(\u0027registryName\u0027), \u0027.azurecr.io\u0027)]"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "DOCKER_REGISTRY_SERVER_USERNAME",
+                                                                                        "value":  "[listCredentials(resourceId(\u0027Microsoft.ContainerRegistry/registries\u0027, parameters(\u0027registryName\u0027)), \u00272023-07-01\u0027).username]"
+                                                                                    },
+                                                                                    {
+                                                                                        "name":  "DOCKER_REGISTRY_SERVER_PASSWORD",
+                                                                                        "value":  "[listCredentials(resourceId(\u0027Microsoft.ContainerRegistry/registries\u0027, parameters(\u0027registryName\u0027)), \u00272023-07-01\u0027).passwords[0].value]"
+                                                                                    }
+                                                                                ],
+                                                                "azureStorageAccounts":  {
+                                                                                             "data":  {
+                                                                                                          "type":  "AzureFiles",
+                                                                                                          "accountName":  "[parameters(\u0027storageName\u0027)]",
+                                                                                                          "shareName":  "[parameters(\u0027shareName\u0027)]",
+                                                                                                          "mountPath":  "/app/data",
+                                                                                                          "accessKey":  "[listKeys(resourceId(\u0027Microsoft.Storage/storageAccounts\u0027, parameters(\u0027storageName\u0027)), \u00272023-05-01\u0027).keys[0].value]"
+                                                                                                      }
+                                                                                         }
+                                                            }
+                                         }
+                      },
+                      {
+                          "type":  "Microsoft.Web/sites/config",
+                          "apiVersion":  "2023-12-01",
+                          "name":  "[concat(parameters(\u0027appName\u0027), \u0027/authsettingsV2\u0027)]",
+                          "dependsOn":  [
+                                            "[resourceId(\u0027Microsoft.Web/sites\u0027, parameters(\u0027appName\u0027))]"
+                                        ],
+                          "properties":  {
+                                             "platform":  {
+                                                              "enabled":  true
+                                                          },
+                                             "globalValidation":  {
+                                                                      "requireAuthentication":  true,
+                                                                      "unauthenticatedClientAction":  "RedirectToLoginPage",
+                                                                      "redirectToProvider":  "azureactivedirectory",
+                                                                      "excludedPaths":  [
+                                                                                            "/api/intake",
+                                                                                            "/api/replies",
+                                                                                            "/api/attachment"
+                                                                                        ]
+                                                                  },
+                                             "identityProviders":  {
+                                                                       "azureActiveDirectory":  {
+                                                                                                    "enabled":  true,
+                                                                                                    "registration":  {
+                                                                                                                         "openIdIssuer":  "[concat(\u0027https://login.microsoftonline.com/\u0027, parameters(\u0027tenantId\u0027), \u0027/v2.0\u0027)]",
+                                                                                                                         "clientId":  "[parameters(\u0027authClientId\u0027)]",
+                                                                                                                         "clientSecretSettingName":  "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET"
+                                                                                                                     },
+                                                                                                    "validation":  {
+                                                                                                                       "allowedAudiences":  [
+                                                                                                                                                "[parameters(\u0027authClientId\u0027)]",
+                                                                                                                                                "[concat(\u0027api://\u0027, parameters(\u0027authClientId\u0027))]"
+                                                                                                                                            ]
+                                                                                                                   }
+                                                                                                }
+                                                                   },
+                                             "login":  {
+                                                           "tokenStore":  {
+                                                                              "enabled":  true
+                                                                          }
+                                                       },
+                                             "httpSettings":  {
+                                                                  "requireHttps":  true
+                                                              }
+                                         }
+                      }
+                  ],
+    "outputs":  {
+                    "url":  {
+                                "type":  "string",
+                                "value":  "[concat(\u0027https://\u0027, variables(\u0027hostName\u0027))]"
+                            }
+                }
+}

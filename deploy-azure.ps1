@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Creates (or updates, when run again) in resource group rugrel-biddesk:
-    - a container registry, and builds the app image there from this folder
+    - a container registry, with the app image built here by Docker and uploaded
       (.dockerignore keeps samples/, data/ and .env out of it)
     - a storage account with an Azure Files share mounted at /app/data (tenders, summaries, documents)
     - an App Service plan (Linux B1) and the web app, always on, HTTPS only
@@ -16,18 +16,17 @@
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\deploy-azure.ps1
-  powershell -ExecutionPolicy Bypass -File .\deploy-azure.ps1 -CopyData     # also upload the local data\ folder once
 #>
 param(
     [string]$Location = "centralindia",
-    [string]$ResourceGroup = "rugrel-biddesk",
-    [switch]$CopyData
+    [string]$ResourceGroup = "rugrel-biddesk"
 )
 
-$ErrorActionPreference = "Stop"
+# The Az helper throws on any failed az call; "Continue" keeps expected "not found" lookups (2>$null) harmless in PowerShell 5.1.
+$ErrorActionPreference = "Continue"
 Set-Location $PSScriptRoot
 function Az {
-    $out = & az @args
+    $out = & az.cmd @args
     if ($LASTEXITCODE -ne 0) { throw "az $($args[0..2] -join ' ') ... failed (see the message above)" }
     return $out
 }
@@ -51,90 +50,62 @@ foreach ($p in "Microsoft.Web", "Microsoft.ContainerRegistry", "Microsoft.Storag
 Step "Resource group $ResourceGroup ($Location)"
 Az group create -n $ResourceGroup -l $Location -o none
 
-Step "Container registry $acr, and build the image there"
-Az acr create -g $ResourceGroup -n $acr --sku Basic --admin-enabled false -o none
-Az acr build -r $acr -t biddesk:latest -t "biddesk:$(git rev-parse --short HEAD)" . --no-logs -o none
+Step "Container registry $acr; build the image here with Docker and upload it"
+# Admin login on: the web app pulls with it (this subscription's policy blocks granting AcrPull to the app).
+Az acr create -g $ResourceGroup -n $acr --sku Basic --admin-enabled true -o none
+Az acr update -n $acr --admin-enabled true -o none
+# Built locally (az acr build's upload step fails in this Azure CLI); .dockerignore keeps samples/, data/, .env out.
+& docker build -t $image -t "$acr.azurecr.io/biddesk:$(git rev-parse --short HEAD)" .
+if ($LASTEXITCODE -ne 0) { throw "docker build failed. Is Docker Desktop running?" }
+$token = Az acr login -n $acr --expose-token --query accessToken -o tsv
+# Passed as an argument: PowerShell 5.1 appends CRLF when piping to --password-stdin, which breaks the token.
+$password = ("" + $token).Trim()
+& docker login "$acr.azurecr.io" -u 00000000-0000-0000-0000-000000000000 -p $password 2>&1 | Where-Object { $_ -notmatch 'WARNING' }
+if ($LASTEXITCODE -ne 0) { throw "docker login to $acr failed" }
+& docker push --all-tags "$acr.azurecr.io/biddesk"
+if ($LASTEXITCODE -ne 0) { throw "docker push failed" }
 
-Step "Storage for tender data ($storage / $share)"
-Az storage account create -g $ResourceGroup -n $storage -l $Location --sku Standard_LRS --kind StorageV2 --min-tls-version TLS1_2 --allow-blob-public-access false -o none
-Az storage share-rm create -g $ResourceGroup --storage-account $storage -n $share --quota 100 -o none 2>$null
-$storageKey = Az storage account keys list -g $ResourceGroup -n $storage --query "[0].value" -o tsv
-if ($CopyData -and (Test-Path data)) {
-    Step "Copying the local data\ folder to Azure (one time)"
-    Az storage file upload-batch --account-name $storage --account-key $storageKey --destination $share --source data -o none
+
+# Everything else is one ARM template (infra/azuredeploy.json): this PC's Smart App Control blocks the
+# Azure CLI's "webapp" and "storage" commands, but "deployment", "rest" and "ad" work.
+$site = "https://management.azure.com/subscriptions/$sub/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$app"
+$current = & az.cmd rest --method post --url "$site/config/appsettings/list?api-version=2023-12-01" --query properties -o json 2>$null | Out-String
+$current = if ($LASTEXITCODE -eq 0 -and $current.Trim()) { $current | ConvertFrom-Json } else { $null }
+
+Step "Company sign-in (Entra ID app registration)"
+# Stop here rather than ever putting the app online without sign-in.
+$appId = Az ad app list --display-name "Bid desk ($app)" --query "[0].appId" -o tsv
+if (-not $appId) {
+    $appId = Az ad app create --display-name "Bid desk ($app)" --sign-in-audience AzureADMyOrg `
+        --web-redirect-uris "https://$hostName/.auth/login/aad/callback" --enable-id-token-issuance true --query appId -o tsv
+    Az ad sp create --id $appId -o none
 }
+$secret = if ($current -and $current.MICROSOFT_PROVIDER_AUTHENTICATION_SECRET) { $current.MICROSOFT_PROVIDER_AUTHENTICATION_SECRET }
+          else { Az ad app credential reset --id $appId --display-name "app-service" --years 2 --append --query password -o tsv }
+$apiKey = if ($current -and $current.BIDDESK_API_KEY) { $current.BIDDESK_API_KEY }
+          else { -join ((48..57) + (97..122) | Get-Random -Count 40 | ForEach-Object { [char]$_ }) }
 
-Step "App Service plan (Linux B1) and web app $app"
-Az appservice plan create -g $ResourceGroup -n $plan --is-linux --sku B1 -o none
-$exists = & az webapp show -g $ResourceGroup -n $app --query name -o tsv 2>$null
-if (-not $exists) { Az webapp create -g $ResourceGroup -p $plan -n $app --container-image-name $image -o none }
-Az webapp update -g $ResourceGroup -n $app --https-only true -o none
-Az webapp config set -g $ResourceGroup -n $app --always-on true --ftps-state Disabled --min-tls-version 1.2 -o none
-
-Step "Let the app pull its image (managed identity)"
-$principal = Az webapp identity assign -g $ResourceGroup -n $app --query principalId -o tsv
-$acrId = Az acr show -n $acr --query id -o tsv
-& az role assignment create --assignee-object-id $principal --assignee-principal-type ServicePrincipal --role AcrPull --scope $acrId -o none 2>$null
-if ($LASTEXITCODE -eq 0) {
-    Az webapp config set -g $ResourceGroup -n $app --generic-configurations '{\"acrUseManagedIdentityCreds\": true}' -o none
-    Az webapp config container set -g $ResourceGroup -n $app --container-image-name $image --container-registry-url "https://$acr.azurecr.io" -o none
-} else {
-    Write-Host "No permission to assign roles; using the registry's admin login instead." -ForegroundColor Yellow
-    Az acr update -n $acr --admin-enabled true -o none
-    $acrUser = Az acr credential show -n $acr --query username -o tsv
-    $acrPass = Az acr credential show -n $acr --query "passwords[0].value" -o tsv
-    Az webapp config container set -g $ResourceGroup -n $app --container-image-name $image --container-registry-url "https://$acr.azurecr.io" --container-registry-user $acrUser --container-registry-password $acrPass -o none
-}
-
-Step "Mount the data share at /app/data"
-$mounted = & az webapp config storage-account list -g $ResourceGroup -n $app --query "[?name=='data'].name" -o tsv 2>$null
-if (-not $mounted) {
-    Az webapp config storage-account add -g $ResourceGroup -n $app --custom-id data --storage-type AzureFiles --share-name $share --account-name $storage --access-key $storageKey --mount-path /app/data -o none
-}
-
-Step "App settings"
-$apiKey = & az webapp config appsettings list -g $ResourceGroup -n $app --query "[?name=='BIDDESK_API_KEY'].value" -o tsv 2>$null
-if (-not $apiKey) { $apiKey = -join ((48..57) + (97..122) | Get-Random -Count 40 | ForEach-Object { [char]$_ }) }
-$settings = @("WEBSITES_PORT=8000", "WEBSITES_CONTAINER_START_TIME_LIMIT=600", "TZ=Asia/Kolkata",
-              "BIDDESK_DATA_DIR=/app/data", "BIDDESK_ALLOWED_HOSTS=$hostName", "BIDDESK_API_KEY=$apiKey")
-foreach ($k in "GEMINI_API_KEY", "ANTHROPIC_API_KEY") { if ($envFile[$k]) { $settings += "$k=$($envFile[$k])" } }
-Az webapp config appsettings set -g $ResourceGroup -n $app --settings @settings -o none
-
-Step "Company sign-in (Entra ID)"
-$authOk = $true
+Step "Storage, App Service plan (Linux B1), web app $app, data mount, settings and sign-in"
+$params = @{ location = $Location; appName = $app; planName = $plan; registryName = $acr; storageName = $storage
+             shareName = $share; image = $image; tenantId = $tenant; authClientId = $appId; authClientSecret = $secret
+             apiKey = $apiKey; geminiApiKey = "$($envFile.GEMINI_API_KEY)"; anthropicApiKey = "$($envFile.ANTHROPIC_API_KEY)" }
+$paramFile = Join-Path $env:TEMP ("biddesk-params-" + [guid]::NewGuid() + ".json")
+$wrapped = @{ '$schema' = "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#"
+              contentVersion = "1.0.0.0"; parameters = @{} }
+foreach ($k in $params.Keys) { $wrapped.parameters[$k] = @{ value = $params[$k] } }
+[IO.File]::WriteAllText($paramFile, ($wrapped | ConvertTo-Json -Depth 5))
 try {
-    $appId = Az ad app list --display-name "Bid desk ($app)" --query "[0].appId" -o tsv
-    if (-not $appId) {
-        $appId = Az ad app create --display-name "Bid desk ($app)" --sign-in-audience AzureADMyOrg `
-            --web-redirect-uris "https://$hostName/.auth/login/aad/callback" --enable-id-token-issuance true --query appId -o tsv
-        Az ad sp create --id $appId -o none
-    }
-    $secret = Az ad app credential reset --id $appId --display-name "app-service" --years 2 --query password -o tsv
-    Az webapp config appsettings set -g $ResourceGroup -n $app --settings "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET=$secret" -o none
-    Az webapp auth microsoft update -g $ResourceGroup -n $app --client-id $appId `
-        --client-secret-setting-name MICROSOFT_PROVIDER_AUTHENTICATION_SECRET `
-        --issuer "https://login.microsoftonline.com/$tenant/v2.0" --yes -o none
-    Az webapp auth update -g $ResourceGroup -n $app --enabled true --action RedirectToLoginPage `
-        --redirect-provider azureactivedirectory --excluded-paths "[/api/intake,/api/replies,/api/attachment]" -o none
-} catch {
-    $authOk = $false
-    Write-Host "Could not set up sign-in automatically: $($_.Exception.Message)" -ForegroundColor Yellow
-}
+    Az deployment group create -g $ResourceGroup -n "biddesk-$(Get-Date -Format yyyyMMdd-HHmmss)" `
+        --template-file infra\azuredeploy.json --parameters "@$paramFile" -o none
+} finally { Remove-Item $paramFile }   # holds secrets
 
-Step "Restart"
-Az webapp restart -g $ResourceGroup -n $app -o none
+Step "Restart (pulls the new image)"
+Start-Sleep -Seconds 20   # give the new AcrPull permission a moment to take effect
+Az rest --method post --url "$site/restart?api-version=2023-12-01" -o none
 
 Step "Point this PC's mail watcher at Azure"
 setx BIDDESK_URL "https://$hostName" | Out-Null
 setx BIDDESK_API_KEY $apiKey | Out-Null
 
-Write-Host "`nDone. Bid desk: https://$hostName" -ForegroundColor Green
+Write-Host "`nDone. Bid desk: https://$hostName (company sign-in required)" -ForegroundColor Green
 Write-Host "The first start takes a few minutes. The mail watcher uses Azure after you log out and back in (or restart it)."
-if (-not $authOk) {
-    Write-Host @"
-SIGN-IN IS NOT ON YET, so do not share the address. In the Azure portal open App Service '$app' >
-Authentication > Add identity provider > Microsoft > 'Current tenant - single tenant' >
-Restrict access: Require authentication > Add. Then under 'Excluded paths' (Edit authentication settings)
-add /api/intake, /api/replies and /api/attachment. If you can't create app registrations, ask IT to do this step.
-"@ -ForegroundColor Yellow
-}
