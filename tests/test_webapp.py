@@ -664,3 +664,51 @@ def test_bad_gem_link_is_refused(env):
     client, _ = env
     r = _gem_bid(client, _shortlist_with_candidate(client), link="https://evil.example/doc")
     assert r.status_code == 400 and "not a GeM document link" in r.get_data(as_text=True)
+
+# ---------------------------------------------------------------- hosting (Azure)
+
+def _key_app(tmp_path, monkeypatch, key="s3cret"):
+    monkeypatch.setattr(triage, "run_triage", fake_triage)
+    monkeypatch.setattr(draft, "run_draft", fake_draft)
+    (tmp_path / "samples").mkdir(exist_ok=True)
+    app = webapp.create_app(data_dir=tmp_path / "data", samples_dir=tmp_path / "samples", sync_jobs=True,
+                            allowed_hosts={"localhost"}, intake_settings=SETTINGS, api_key=key)
+    return app.test_client(), tmp_path / "data"
+
+
+def test_watcher_api_needs_the_key_when_one_is_set(tmp_path, monkeypatch):
+    client, _ = _key_app(tmp_path, monkeypatch)
+    assert client.get("/api/replies").status_code == 401
+    assert client.get("/api/replies", headers={"X-BidDesk-Key": "wrong"}).status_code == 401
+    assert client.get("/api/replies", headers={"X-BidDesk-Key": "s3cret"}).status_code == 200
+    eml = _mail("AHRU Power Supply Requirement", [("RFQ.pdf", b"%PDF-1.4")])
+    r = client.post("/api/intake", data={"entry_id": "E1", "file": (io.BytesIO(eml), "m.eml")},
+                    content_type="multipart/form-data")
+    assert r.status_code == 401
+    assert client.get("/").status_code == 200                      # pages are protected by Azure sign-in instead
+
+
+def test_reply_drafted_and_pack_download_on_fixed_paths(mail_env):
+    client, data = mail_env
+    bid_id = _mail_bid(client)
+    client.post(f"/bids/{bid_id}/decide", data={"decision": "Go"})
+    (due,) = client.get("/api/replies").json
+    pack = client.get("/api/attachment", query_string={"path": due["attachments"][0]})
+    assert pack.status_code == 200 and zipfile.ZipFile(io.BytesIO(pack.data)).namelist()
+    assert client.get("/api/attachment", query_string={"path": "../../etc/passwd"}).status_code == 404
+    assert client.get("/api/attachment", query_string={"path": f"bids/{bid_id}/meta.json"}).status_code == 404
+    assert client.post("/api/replies", data={"bid_id": bid_id, "decision": "Go"}).status_code == 200
+    assert client.get("/api/replies").json == []
+
+
+def test_app_from_env_serves_the_azure_address(tmp_path, monkeypatch):
+    monkeypatch.setenv("BIDDESK_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("BIDDESK_ALLOWED_HOSTS", "biddesk.azurewebsites.net")
+    monkeypatch.setenv("BIDDESK_API_KEY", "k")
+    client = webapp.app_from_env().test_client()
+    site = "https://biddesk.azurewebsites.net"
+    assert client.get("/", base_url=site).status_code == 200
+    r = client.post("/shortlists", base_url=site, headers={"Origin": site}, data={})
+    assert r.status_code != 403                                    # our own https origin is accepted
+    assert client.get("/api/replies", base_url=site).status_code == 401
+    assert client.get("/", base_url="https://evil.example").status_code == 400

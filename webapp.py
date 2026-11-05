@@ -7,6 +7,7 @@ Who decides what:
 - Mahadevan, on a bid's triage card: Go / No-go / Ask, after the full RFQ has been read.
 """
 
+import hmac
 import io
 import json
 import os
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from flask import (Flask, abort, jsonify, redirect, render_template, request, send_file, send_from_directory,
                    url_for)
+from werkzeug.security import safe_join
 from werkzeug.utils import secure_filename
 
 import draft
@@ -100,7 +102,7 @@ def _days_key(item: dict):
 
 def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "samples", sync_jobs: bool = False,
                allowed_hosts: set[str] = frozenset({"localhost:8010", "127.0.0.1:8010"}),
-               intake_settings: dict | None = None):
+               intake_settings: dict | None = None, api_key: str = ""):
     app = Flask(__name__, template_folder=str(ROOT / "bidtriage" / "web" / "templates"))
     app.config.update(MAX_CONTENT_LENGTH=50 * 1024 * 1024, SYNC_JOBS=sync_jobs)
     data_dir = Path(data_dir)
@@ -109,7 +111,7 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
     for d in (bids_dir, lists_dir):
         if d.is_dir():
             jobs.recover([p for p in d.iterdir() if p.is_dir()])
-    allowed_origins = {f"http://{h}" for h in allowed_hosts}
+    allowed_origins = {f"{scheme}://{h}" for h in allowed_hosts for scheme in ("http", "https")}
 
     @app.before_request
     def same_origin_only():
@@ -117,6 +119,11 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
         # (DNS rebinding): require our own Host, and our own Origin/Referer on any POST that sends one.
         if request.host not in allowed_hosts:
             abort(400)
+        # On Azure the pages sit behind company sign-in, but the mail watcher's API is left open to it,
+        # so the API needs the watcher's secret key instead.
+        if api_key and request.path.startswith("/api/") and not hmac.compare_digest(
+                request.headers.get("X-BidDesk-Key", ""), api_key):
+            abort(401)
         if request.method == "POST":
             origin = request.headers.get("Origin") or ""
             referer = request.headers.get("Referer") or ""
@@ -452,6 +459,20 @@ def create_app(data_dir: Path = ROOT / "data", samples_dir: Path = ROOT / "sampl
                         "attachments": attachments})
         return jsonify(due)
 
+    @app.get("/api/attachment")
+    def api_attachment():
+        """A reply attachment listed by /api/replies (a pack zip), for a watcher on another computer."""
+        rel = request.args.get("path", "")
+        path = safe_join(str(bids_dir), rel.removeprefix("bids/")) if rel.startswith("bids/") else None
+        if not path or not rel.endswith(".zip") or not Path(path).is_file():
+            abort(404)
+        return send_file(path, as_attachment=True, download_name=Path(path).name)
+
+    @app.post("/api/replies")
+    def api_reply_drafted_fixed():
+        # One fixed address, so Azure sign-in can leave exactly the watcher's paths open.
+        return api_reply_drafted(request.form.get("bid_id", ""))
+
     @app.post("/api/replies/<bid_id>/drafted")
     def api_reply_drafted(bid_id):
         bid = folder(bids_dir, bid_id)
@@ -783,5 +804,18 @@ def _write_decision_to_xlsx(path: Path, tender_id: str, decision: str) -> None:
     os.replace(tmp, path)
 
 
+def app_from_env():
+    """The app as configured by environment variables (Azure App Service, or docker compose locally).
+
+    BIDDESK_DATA_DIR       where tenders are stored (default: data/ in the project)
+    BIDDESK_ALLOWED_HOSTS  extra host names it answers to, comma separated (e.g. biddesk.azurewebsites.net)
+    BIDDESK_API_KEY        secret the mail watcher must send to /api/... (unset: no key, local use)
+    """
+    extra = {h.strip() for h in os.environ.get("BIDDESK_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    return create_app(data_dir=Path(os.environ.get("BIDDESK_DATA_DIR") or ROOT / "data"),
+                      allowed_hosts=frozenset({"localhost:8010", "127.0.0.1:8010"} | extra),
+                      api_key=os.environ.get("BIDDESK_API_KEY", ""))
+
+
 if __name__ == "__main__":
-    create_app().run(host="0.0.0.0", port=8000, debug=False, threaded=True)
+    app_from_env().run(host="0.0.0.0", port=8000, debug=False, threaded=True)

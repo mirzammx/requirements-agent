@@ -21,12 +21,13 @@ param(
     [switch]$Once,
     [int]$IntervalSeconds = 120,
     [string]$FolderName = "Bid desk",
-    [string]$AppUrl = "http://localhost:8010"
+    # The app on Azure: set BIDDESK_URL (https://....azurewebsites.net) and BIDDESK_API_KEY for this Windows user.
+    [string]$AppUrl = $(if ($env:BIDDESK_URL) { $env:BIDDESK_URL.TrimEnd('/') } else { "http://localhost:8010" }),
+    [string]$ApiKey = $env:BIDDESK_API_KEY
 )
 
 $ErrorActionPreference = "Stop"
 $PickedUp = "Bid desk: picked up"
-$DataDir = Join-Path $PSScriptRoot "data"
 $Temp = Join-Path $env:TEMP "biddesk-mailwatch"
 New-Item -ItemType Directory -Force -Path $Temp | Out-Null
 
@@ -53,7 +54,8 @@ function Ensure-Category($ns) {
 function Invoke-Api([string[]]$CurlArgs) {
     # curl.exe is Windows-signed; reading the reply from a UTF-8 file keeps non-English text intact.
     $out = Join-Path $Temp ("resp-" + [guid]::NewGuid() + ".json")
-    $code = & curl.exe -s -o $out -w "%{http_code}" @CurlArgs
+    $auth = if ($ApiKey) { @("-H", "X-BidDesk-Key: $ApiKey") } else { @() }
+    $code = & curl.exe -s -o $out -w "%{http_code}" @auth @CurlArgs
     $body = if (Test-Path $out) { Get-Content -Raw -Encoding UTF8 $out } else { "" }
     Remove-Item $out -ErrorAction SilentlyContinue
     return @{ Code = [int]$code; Body = $body }
@@ -125,12 +127,14 @@ function Write-ReplyDrafts($ns) {
                 throw "our reply text did not make it into the draft, so it was not saved"
             }
             foreach ($a in $d.attachments) {
-                $file = Join-Path $DataDir ($a -replace '/', '\')
-                if (Test-Path $file) { $reply.Attachments.Add($file) | Out-Null }
-                else { throw "attachment not found: $file" }
+                # Downloaded from the app, which may be on Azure rather than this PC.
+                $file = Join-Path $Temp (Split-Path $a -Leaf)
+                $got = Invoke-Api @("-o", $file, "--get", "--data-urlencode", "path=$a", "$AppUrl/api/attachment")
+                if ($got.Code -eq 200 -and (Test-Path $file)) { $reply.Attachments.Add($file) | Out-Null; Remove-Item $file }
+                else { throw "could not download the attachment $a (HTTP $($got.Code))" }
             }
             $reply.Save()   # Drafts only. Never Send().
-            $ack = Invoke-Api @("-X", "POST", "-F", "decision=$($d.decision)", "$AppUrl/api/replies/$($d.bid_id)/drafted")
+            $ack = Invoke-Api @("-X", "POST", "-F", "bid_id=$($d.bid_id)", "-F", "decision=$($d.decision)", "$AppUrl/api/replies")
             if ($ack.Code -eq 409) {
                 # Mahadevan changed the decision while this draft was being made: remove our outdated draft.
                 $reply.Delete()

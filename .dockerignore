@@ -1,5 +1,12 @@
-﻿.venv
+﻿# Never put tender documents, API keys or local state into the image (it is uploaded to Azure to be built).
+.venv
+.git
+.vscode
+.claude
+.superpowers
+.env
 out
 samples
-.superpowers
-.git
+data
+__pycache__
+*.pyc

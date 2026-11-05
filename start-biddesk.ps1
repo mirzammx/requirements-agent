@@ -13,6 +13,13 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir "biddesk.log"
 function Log($text) { Add-Content -Path $log -Encoding UTF8 -Value ("{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $text) }
 
+if ($env:BIDDESK_URL) {
+    Log "App is on $($env:BIDDESK_URL); no local Docker needed. Starting the mail watcher."
+    & (Join-Path $PSScriptRoot "mailwatch.ps1") *>> $log
+    Log "Mail watcher stopped."
+    exit
+}
+
 Log "Starting. Waiting for Docker Desktop..."
 $deadline = (Get-Date).AddMinutes(15)
 while ($true) {
