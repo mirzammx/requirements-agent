@@ -7,6 +7,8 @@ Three tools for the Rug-Rel SBU-2 bid process:
 1. **`triage.py`** turns one bid email and its documents (RFQ PDFs, compliance and price sheets) into a one-page assessment card, so Mahadevan can decide Go / No-go / Ask in minutes.
 2. **`draft.py`** turns an approved bid into editable response documents (technical compliance, buyer's compliance form, price sheet, declarations, pre-bid queries, checklist). Everything a person must decide or supply is a highlighted `[[placeholder]]`.
 
+How it all fits together (flowchart): open [docs/architecture.html](docs/architecture.html) in a browser.
+
 ## Setup (Docker)
 
 Windows Smart App Control on this PC blocks Python's compiled packages, so the tools run in a Linux container. Start Docker Desktop, then from the project folder:

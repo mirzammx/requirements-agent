@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bid Desk Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column of engineering figures, each a schematic with a short caption; diagrams scroll sideways on phones. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --fg: #1c2230;
+  --muted: #5b6475;
+  --line: #c9cfda;
+  --ai: #7a3fb0;          /* AI steps: Rug-Rel violet */
+  --ai-bg: #f3ecfa;
+  --human: #b8650a;       /* human decisions */
+  --human-bg: #fdf1e2;
+  --manual: #8a93a3;      /* still manual today */
+  --ok: #1e7a4a;          /* automatic, no AI */
+  --ok-bg: #e6f3ec;
+  --stop: #b3261e;
+  --font-display: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151c; --surface: #1a1f29; --fg: #e4e8f0; --muted: #9aa3b4; --line: #343b4a;
+    --ai: #c39af0; --ai-bg: #2a2138; --human: #f0a65a; --human-bg: #33261a; --manual: #7d8696;
+    --ok: #7fcf9f; --ok-bg: #1b2e24; --stop: #ff8a80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151c; --surface: #1a1f29; --fg: #e4e8f0; --muted: #9aa3b4; --line: #343b4a;
+  --ai: #c39af0; --ai-bg: #2a2138; --human: #f0a65a; --human-bg: #33261a; --manual: #7d8696;
+  --ok: #7fcf9f; --ok-bg: #1b2e24; --stop: #ff8a80; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+}
+main { max-width: 1040px; margin: 0 auto; display: grid; gap: 56px; }
+header { display: grid; gap: 14px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ai); }
+h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(30px, 5vw, 46px); line-height: 1.1; margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+h2 { font-family: var(--font-display); font-weight: 700; font-size: 24px; line-height: 1.25; margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 68ch; }
+.lede { font-size: 18px; color: var(--muted); max-width: 64ch; }
+section { display: grid; gap: 16px; }
+.num { font-family: var(--font-mono); color: var(--muted); font-weight: 500; margin-right: 8px; }
+
+figure { margin: 0; display: grid; gap: 12px; }
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 14px; }
+.diagram svg { display: block; width: 100%; height: auto; min-width: 960px; color: var(--fg); }
+figcaption { font-size: 14px; color: var(--muted); max-width: 80ch; }
+
+/* SVG vocabulary (page-level CSS, theme tokens) */
+svg text { fill: currentColor; font-family: var(--font-body); }
+svg .t-title { font-family: var(--font-display); font-weight: 700; font-size: 14px; }
+svg .t-sub { font-size: 11.5px; fill: var(--muted); }
+svg .t-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; fill: var(--muted); }
+svg .t-label { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+svg .t-group { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; fill: var(--muted); }
+svg .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+svg .box.input { fill: var(--bg); }
+svg .box.ai { fill: var(--ai-bg); stroke: var(--ai); }
+svg .box.human { fill: var(--human-bg); stroke: var(--human); }
+svg .box.manual { fill: var(--surface); stroke: var(--manual); stroke-dasharray: 5 4; }
+svg .box.ok { fill: var(--ok-bg); stroke: var(--ok); }
+svg .chip { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+svg .group { fill: none; stroke: var(--line); stroke-width: 1.5; }
+svg .boundary { fill: none; stroke: var(--manual); stroke-width: 1.5; stroke-dasharray: 7 5; }
+svg .edge { fill: none; stroke: currentColor; stroke-width: 1.5; }
+svg .edge.thin { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+svg .edge.manual { stroke: var(--manual); stroke-dasharray: 5 4; }
+svg .edge.ai { stroke: var(--ai); stroke-width: 2; }
+svg .edge.ok { stroke: var(--ok); stroke-width: 2; }
+svg .edge.stop { stroke: var(--stop); }
+svg .head { fill: currentColor; }
+svg .head.ai { fill: var(--ai); }
+svg .head.ok { fill: var(--ok); }
+svg .head.manual { fill: var(--manual); }
+svg .head.stop { fill: var(--stop); }
+svg .t-stop { fill: var(--stop); font-size: 11.5px; }
+svg .t-ai { fill: var(--ai); }
+svg .t-ok { fill: var(--ok); }
+svg .bracket { fill: none; stroke: var(--muted); stroke-width: 1; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 22px; height: 14px; border-radius: 3px; border: 1.5px solid; display: inline-block; }
+.sw.ai { background: var(--ai-bg); border-color: var(--ai); }
+.sw.human { background: var(--human-bg); border-color: var(--human); }
+.sw.ok { background: var(--ok-bg); border-color: var(--ok); }
+.sw.input { background: var(--bg); border-color: var(--line); }
+
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.rule { padding: 16px 18px; border-bottom: 1px solid var(--line); display: grid; gap: 4px; min-width: 0; }
+.rule strong { font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+.rule p { font-size: 14px; color: var(--muted); }
+.rule code { font-family: var(--font-mono); font-size: 12.5px; color: var(--fg); }
+
+.next { display: grid; gap: 10px; padding: 0; margin: 0; list-style: none; }
+.next li { display: grid; grid-template-columns: 9.5rem 1fr; gap: 14px; align-items: baseline; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.next li:last-child { border-bottom: 0; }
+.next .stage { font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--manual); }
+.next p { font-size: 15px; }
+@media (max-width: 560px) { .next li { grid-template-columns: 1fr; gap: 2px; } }
+code { font-family: var(--font-mono); font-size: .92em; }
+</style>
+
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Rug-Rel SBU-2 · Bid desk</div>
+    <h1>How a tender becomes a reply to BD</h1>
+    <p class="lede">Outlook rules bring the mail in. The AI sorts the BidAssist list and writes a summary of each RFQ, Mahadevan decides whether to bid, and the AI drafts the reply documents. The reply to BD waits in your Outlook Drafts. The AI never sends, never prices and never decides.</p>
+  </header>
+
+  <!-- Figure 1: end-to-end flow -->
+  <section>
+    <h2><span class="num">1</span>The flow, end to end</h2>
+    <figure>
+      <div class="diagram">
+        <svg viewBox="0 0 1275 300" role="img" aria-label="Eight steps. Outlook rules file BidAssist alerts and BD's RFQ mails into the Bid desk folder. The AI sorts the BidAssist Power supply list. BD presses Get RFQ and check; GeM documents download by themselves, other sites are uploaded. The AI writes a summary. Mahadevan answers Do we bid: Yes, No or Need more info. On Yes the AI makes the reply documents. The mail watcher puts a ReplyAll draft to BD in Outlook Drafts. People fill prices, send and submit. BD's own RFQ emails go straight to the AI summary.">
+          <defs>
+            <marker id="f1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+          </defs>
+
+          <!-- BD's own RFQ mails skip the list and go straight to the summary -->
+          <text class="t-label" x="557" y="22" text-anchor="middle">BD's RFQ emails (HAL, BEL…) from the Bid desk folder</text>
+          <path class="edge" d="M77,96 V36 H557 V92" marker-end="url(#f1-arrow)"/>
+
+          <!-- step boxes: x = 15 + i*160, w=125, y 96..180 -->
+          <rect class="box input" x="15" y="96" width="125" height="84" rx="8"/>
+          <text class="t-eyebrow" x="77" y="114" text-anchor="middle">Outlook rules</text>
+          <text class="t-title" x="77" y="135" text-anchor="middle">Bid desk folder</text>
+          <text class="t-sub" x="77" y="153" text-anchor="middle">BidAssist alerts +</text>
+          <text class="t-sub" x="77" y="168" text-anchor="middle">BD's RFQ mails</text>
+
+          <rect class="box ai" x="175" y="96" width="125" height="84" rx="8"/>
+          <text class="t-eyebrow" x="237" y="114" text-anchor="middle">AI</text>
+          <text class="t-title" x="237" y="135" text-anchor="middle">Sort the list</text>
+          <text class="t-sub" x="237" y="153" text-anchor="middle">Power supply list,</text>
+          <text class="t-sub" x="237" y="168" text-anchor="middle">a reason for each</text>
+
+          <rect class="box human" x="335" y="96" width="125" height="84" rx="8"/>
+          <text class="t-eyebrow" x="397" y="114" text-anchor="middle">BD · one click</text>
+          <text class="t-title" x="397" y="135" text-anchor="middle">Get RFQ &amp; check</text>
+          <text class="t-sub" x="397" y="153" text-anchor="middle">GeM: downloads itself</text>
+          <text class="t-sub" x="397" y="168" text-anchor="middle">others: upload · or Skip</text>
+
+          <rect class="box ai" x="495" y="96" width="125" height="84" rx="8"/>
+          <text class="t-eyebrow" x="557" y="114" text-anchor="middle">AI</text>
+          <text class="t-title" x="557" y="135" text-anchor="middle">AI summary</text>
+          <text class="t-sub" x="557" y="153" text-anchor="middle">reads the full RFQ,</text>
+          <text class="t-sub" x="557" y="168" text-anchor="middle">fit, risks, questions</text>
+
+          <rect class="box human" x="655" y="96" width="125" height="84" rx="8"/>
+          <text class="t-eyebrow" x="717" y="114" text-anchor="middle">Mahadevan</text>
+          <text class="t-title" x="717" y="135" text-anchor="middle">Do we bid?</text>
+          <text class="t-sub" x="717" y="153" text-anchor="middle">Yes, bid / No /</text>
+          <text class="t-sub" x="717" y="168" text-anchor="middle">Need more info</text>
+
+          <rect class="box ai" x="815" y="96" width="125" height="84" rx="8"/>
+          <text class="t-eyebrow" x="877" y="114" text-anchor="middle">AI</text>
+          <text class="t-title" x="877" y="135" text-anchor="middle">Reply documents</text>
+          <text class="t-sub" x="877" y="153" text-anchor="middle">compliance, forms,</text>
+          <text class="t-sub" x="877" y="168" text-anchor="middle">price sheet (blank)</text>
+
+          <rect class="box ok" x="975" y="96" width="125" height="84" rx="8"/>
+          <text class="t-eyebrow" x="1037" y="114" text-anchor="middle">Mail watcher</text>
+          <text class="t-title" x="1037" y="135" text-anchor="middle">Reply in Drafts</text>
+          <text class="t-sub" x="1037" y="153" text-anchor="middle">ReplyAll to BD,</text>
+          <text class="t-sub" x="1037" y="168" text-anchor="middle">Mahadevan in CC</text>
+
+          <rect class="box human" x="1135" y="96" width="125" height="84" rx="8"/>
+          <text class="t-eyebrow" x="1197" y="114" text-anchor="middle">You · BD</text>
+          <text class="t-title" x="1197" y="135" text-anchor="middle">Send &amp; submit</text>
+          <text class="t-sub" x="1197" y="153" text-anchor="middle">fill yellow gaps,</text>
+          <text class="t-sub" x="1197" y="168" text-anchor="middle">price, press Send</text>
+
+          <!-- flow arrows (box right edge x_i+125 → next x-2) with labels above -->
+          <line class="edge" x1="140" y1="138" x2="173" y2="138" marker-end="url(#f1-arrow)"/>
+          <text class="t-label" x="157" y="86" text-anchor="middle">alert</text>
+          <line class="edge" x1="300" y1="138" x2="333" y2="138" marker-end="url(#f1-arrow)"/>
+          <text class="t-label" x="317" y="86" text-anchor="middle">a handful</text>
+          <line class="edge" x1="460" y1="138" x2="493" y2="138" marker-end="url(#f1-arrow)"/>
+          <text class="t-label" x="477" y="86" text-anchor="middle">RFQ</text>
+          <line class="edge" x1="620" y1="138" x2="653" y2="138" marker-end="url(#f1-arrow)"/>
+          <text class="t-label" x="637" y="86" text-anchor="middle">summary</text>
+          <line class="edge" x1="780" y1="138" x2="813" y2="138" marker-end="url(#f1-arrow)"/>
+          <text class="t-label" x="797" y="86" text-anchor="middle">Yes</text>
+          <line class="edge" x1="940" y1="138" x2="973" y2="138" marker-end="url(#f1-arrow)"/>
+          <text class="t-label" x="957" y="86" text-anchor="middle">files</text>
+          <line class="edge" x1="1100" y1="138" x2="1133" y2="138" marker-end="url(#f1-arrow)"/>
+          <text class="t-label" x="1117" y="86" text-anchor="middle">draft</text>
+
+          <!-- No / Need more info also get a reply draft, without documents -->
+          <path class="edge thin" d="M717,180 V206 H1037 V182"/>
+          <text class="t-label" x="877" y="222" text-anchor="middle">No / Need more info → reply drafted too, no files</text>
+
+          <!-- outputs row -->
+          <text class="t-group" x="15" y="252">What each step leaves behind</text>
+          <line class="edge thin" x1="237" y1="180" x2="237" y2="262"/>
+          <rect class="chip" x="175" y="262" width="125" height="30" rx="6"/>
+          <text class="t-sub" x="237" y="281" text-anchor="middle">list + Excel tracker</text>
+          <line class="edge thin" x1="557" y1="180" x2="557" y2="262"/>
+          <rect class="chip" x="495" y="262" width="125" height="30" rx="6"/>
+          <text class="t-sub" x="557" y="281" text-anchor="middle">AI summary page</text>
+          <line class="edge thin" x1="877" y1="232" x2="877" y2="262"/>
+          <rect class="chip" x="815" y="262" width="125" height="30" rx="6"/>
+          <text class="t-sub" x="877" y="281" text-anchor="middle">Word + Excel files</text>
+          <line class="edge thin" x1="1037" y1="232" x2="1037" y2="262"/>
+          <rect class="chip" x="975" y="262" width="125" height="30" rx="6"/>
+          <text class="t-sub" x="1037" y="281" text-anchor="middle">never sent by itself</text>
+        </svg>
+      </div>
+      <div class="legend" aria-hidden="true">
+        <span><i class="sw ai"></i>AI step</span>
+        <span><i class="sw human"></i>People decide or finish</span>
+        <span><i class="sw ok"></i>Automatic, no AI</span>
+        <span><i class="sw input"></i>Input</span>
+      </div>
+      <figcaption>The Home page lists what's waiting at each step, one table per next action. BD picks which tenders are worth a look; for GeM tenders the app downloads the bid document itself and checks the bid number printed inside it. Tenders on other sites (IOCL, defproc, CPPP…) need a login there, so BD downloads and uploads those. Mahadevan makes the one bid decision after reading the AI summary. Every decision, including No, produces a reply to BD in your Outlook Drafts.</figcaption>
+    </figure>
+  </section>
+
+  <!-- Figure 2: inside one AI step -->
+  <section>
+    <h2><span class="num">2</span>Inside one AI step, and where the rules are enforced</h2>
+    <p>Sorting the list, the AI summary and the reply documents all follow the same pattern. The model does one thing, writing structured content, and ordinary code checks it and lays it out. That is why the documents look the same every time and why the safety rules hold even if the model gets something wrong.</p>
+    <figure>
+      <div class="diagram">
+        <svg viewBox="0 0 1160 300" role="img" aria-label="Tender documents are prepared into content blocks, sent in one AI call with the prompts and profiles, checked against a fixed schema, passed through code rules (no prices, no unbacked certifications, items to review become yellow gaps), and laid out into files by code. Invalid or refused replies stop with an error and write nothing.">
+          <defs>
+            <marker id="f2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+            <marker id="f2-arrow-ai" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head ai" d="M0,0 L10,5 L0,10 z"/></marker>
+            <marker id="f2-arrow-stop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head stop" d="M0,0 L10,5 L0,10 z"/></marker>
+          </defs>
+
+          <rect class="box input" x="15" y="70" width="150" height="100" rx="8"/>
+          <text class="t-title" x="90" y="98" text-anchor="middle">Tender documents</text>
+          <text class="t-sub" x="90" y="120" text-anchor="middle">email (.msg / .eml)</text>
+          <text class="t-sub" x="90" y="138" text-anchor="middle">RFQ / GeM PDFs</text>
+          <text class="t-sub" x="90" y="156" text-anchor="middle">Excel sheets</text>
+
+          <rect class="box" x="211" y="70" width="150" height="100" rx="8"/>
+          <text class="t-title" x="286" y="98" text-anchor="middle">Prepare</text>
+          <text class="t-sub" x="286" y="120" text-anchor="middle">PDF → sent as-is</text>
+          <text class="t-sub" x="286" y="138" text-anchor="middle">Excel → text table</text>
+          <text class="t-sub" x="286" y="156" text-anchor="middle">locked/other → Not read</text>
+
+          <rect class="box ai" x="407" y="70" width="150" height="100" rx="8"/>
+          <text class="t-title t-ai" x="482" y="98" text-anchor="middle">One AI call</text>
+          <text class="t-sub" x="482" y="120" text-anchor="middle">Claude or Gemini</text>
+          <text class="t-sub" x="482" y="138" text-anchor="middle">+ capability profile</text>
+          <text class="t-sub" x="482" y="156" text-anchor="middle">+ company profile</text>
+
+          <rect class="box" x="603" y="70" width="150" height="100" rx="8"/>
+          <text class="t-title" x="678" y="98" text-anchor="middle">Schema check</text>
+          <text class="t-sub" x="678" y="120" text-anchor="middle">reply must match</text>
+          <text class="t-sub" x="678" y="138" text-anchor="middle">a fixed JSON shape</text>
+          <text class="t-sub" x="678" y="156" text-anchor="middle">with sources</text>
+
+          <rect class="box ok" x="799" y="70" width="150" height="100" rx="8"/>
+          <text class="t-title" x="874" y="98" text-anchor="middle">Code rules</text>
+          <text class="t-sub" x="874" y="120" text-anchor="middle">no prices, ever</text>
+          <text class="t-sub" x="874" y="138" text-anchor="middle">no unbacked certs</text>
+          <text class="t-sub" x="874" y="156" text-anchor="middle">to review → yellow gap</text>
+
+          <rect class="box" x="995" y="70" width="150" height="100" rx="8"/>
+          <text class="t-title" x="1070" y="98" text-anchor="middle">Layout by code</text>
+          <text class="t-sub" x="1070" y="120" text-anchor="middle">Word · Excel · HTML</text>
+          <text class="t-sub" x="1070" y="138" text-anchor="middle">yellow gaps</text>
+          <text class="t-sub" x="1070" y="156" text-anchor="middle">price formulas</text>
+
+          <line class="edge" x1="165" y1="120" x2="209" y2="120" marker-end="url(#f2-arrow)"/>
+          <text class="t-label" x="188" y="58" text-anchor="middle">files</text>
+          <line class="edge ai" x1="361" y1="120" x2="405" y2="120" marker-end="url(#f2-arrow-ai)"/>
+          <text class="t-label" x="384" y="58" text-anchor="middle">content</text>
+          <line class="edge ai" x1="557" y1="120" x2="601" y2="120" marker-end="url(#f2-arrow-ai)"/>
+          <text class="t-label" x="580" y="58" text-anchor="middle">JSON reply</text>
+          <line class="edge" x1="753" y1="120" x2="797" y2="120" marker-end="url(#f2-arrow)"/>
+          <text class="t-label" x="776" y="58" text-anchor="middle">valid draft</text>
+          <line class="edge" x1="949" y1="120" x2="993" y2="120" marker-end="url(#f2-arrow)"/>
+          <text class="t-label" x="972" y="58" text-anchor="middle">safe draft</text>
+
+          <line class="edge stop" x1="678" y1="170" x2="678" y2="214" marker-end="url(#f2-arrow-stop)"/>
+          <text class="t-stop" x="678" y="232" text-anchor="middle">refused · cut off · invalid →</text>
+          <text class="t-stop" x="678" y="248" text-anchor="middle">clear error, nothing written</text>
+
+          <path class="bracket" d="M407,262 v8 h150 v-8"/>
+          <text class="t-label" x="482" y="288" text-anchor="middle">the only step that varies</text>
+          <path class="bracket" d="M799,262 v8 h346 v-8"/>
+          <text class="t-label" x="972" y="288" text-anchor="middle">plain code: same draft in, same files out</text>
+        </svg>
+      </div>
+      <figcaption>The model's freedom ends at the schema check. After that, code enforces the rules: a price can't appear because the draft has no place to hold one, and any certification or registration the company profile doesn't record becomes a yellow gap to confirm instead of a claim. A bad reply stops the run before anything is written, and a draft that cost an AI call is saved first, so "Remake documents" can rebuild the files without paying again.</figcaption>
+    </figure>
+  </section>
+
+  <!-- Figure 3: where it runs -->
+  <section>
+    <h2><span class="num">3</span>Where it runs</h2>
+    <figure>
+      <div class="diagram">
+        <svg viewBox="0 0 1000 420" role="img" aria-label="On your PC, Outlook and the mail watcher pass new mail to the web app and bring reply drafts back. The browser uses the web app. Inside a Docker container the web app, background jobs and the AI steps read and write the project folder. Two connections leave the PC: the AI call to Claude or Gemini, and the GeM bid document download, one per click.">
+          <defs>
+            <marker id="f3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+            <marker id="f3-arrow-ai" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head ai" d="M0,0 L10,5 L0,10 z"/></marker>
+          </defs>
+
+          <rect class="boundary" x="10" y="20" width="770" height="390" rx="12"/>
+          <text class="t-group" x="28" y="44">Your PC · starts at login</text>
+
+          <!-- people-facing side -->
+          <rect class="box" x="40" y="96" width="170" height="64" rx="8"/>
+          <text class="t-title" x="125" y="124" text-anchor="middle">Browser</text>
+          <text class="t-sub" x="125" y="143" text-anchor="middle">localhost:8010</text>
+          <rect class="box ok" x="40" y="200" width="170" height="64" rx="8"/>
+          <text class="t-title" x="125" y="228" text-anchor="middle">Mail watcher</text>
+          <text class="t-sub" x="125" y="247" text-anchor="middle">checks every 2 minutes</text>
+          <rect class="box input" x="40" y="316" width="170" height="74" rx="8"/>
+          <text class="t-title" x="125" y="342" text-anchor="middle">Outlook</text>
+          <text class="t-sub" x="125" y="361" text-anchor="middle">reads only "Bid desk"</text>
+          <text class="t-sub" x="125" y="378" text-anchor="middle">saves drafts, never sends</text>
+          <line class="edge" x1="125" y1="314" x2="125" y2="266" marker-end="url(#f3-arrow)" marker-start="url(#f3-arrow)"/>
+
+          <!-- container -->
+          <rect class="group" x="262" y="62" width="498" height="216" rx="10"/>
+          <text class="t-group" x="280" y="86">Docker container · Linux</text>
+
+          <rect class="box" x="282" y="104" width="136" height="64" rx="8"/>
+          <text class="t-title" x="350" y="131" text-anchor="middle">Web app</text>
+          <text class="t-sub" x="350" y="150" text-anchor="middle">pages + buttons</text>
+          <rect class="box" x="442" y="104" width="136" height="64" rx="8"/>
+          <text class="t-title" x="510" y="131" text-anchor="middle">Background job</text>
+          <text class="t-sub" x="510" y="150" text-anchor="middle">one at a time per tender</text>
+          <rect class="box ai" x="602" y="104" width="140" height="64" rx="8"/>
+          <text class="t-title" x="672" y="131" text-anchor="middle">AI steps</text>
+          <text class="t-sub" x="672" y="150" text-anchor="middle">sort · summary · docs</text>
+
+          <path class="edge" d="M210,128 H280" marker-end="url(#f3-arrow)"/>
+          <text class="t-label" x="245" y="118" text-anchor="middle">clicks</text>
+          <line class="edge" x1="418" y1="136" x2="440" y2="136" marker-end="url(#f3-arrow)"/>
+          <line class="edge" x1="578" y1="136" x2="600" y2="136" marker-end="url(#f3-arrow)"/>
+          <path class="edge" d="M210,232 H350 V170" marker-end="url(#f3-arrow)" marker-start="url(#f3-arrow)"/>
+          <text class="t-label" x="300" y="222" text-anchor="middle">new mail ⇄ replies</text>
+
+          <rect class="box input" x="282" y="316" width="460" height="74" rx="8"/>
+          <text class="t-title" x="300" y="342">Project folder (OneDrive)</text>
+          <text class="t-sub" x="300" y="362">data/ tenders, AI summaries, reply documents, decisions, logs</text>
+          <text class="t-sub" x="300" y="379">prompts/ capability + company profile · .env (API key, not in git)</text>
+          <line class="edge" x1="708" y1="170" x2="708" y2="314" marker-end="url(#f3-arrow)" marker-start="url(#f3-arrow)"/>
+          <text class="t-label" x="716" y="300">reads / writes</text>
+
+          <!-- outside the PC -->
+          <rect class="box ai" x="822" y="96" width="160" height="84" rx="8"/>
+          <text class="t-title" x="902" y="124" text-anchor="middle">AI provider</text>
+          <text class="t-sub" x="902" y="143" text-anchor="middle">Claude (Anthropic)</text>
+          <text class="t-sub" x="902" y="160" text-anchor="middle">Gemini (Google)</text>
+          <line class="edge ai" x1="742" y1="122" x2="820" y2="122" marker-end="url(#f3-arrow-ai)"/>
+          <text class="t-label" x="781" y="112" text-anchor="middle">docs + prompt</text>
+          <line class="edge ai" x1="820" y1="154" x2="744" y2="154" marker-end="url(#f3-arrow-ai)"/>
+          <text class="t-label" x="781" y="172" text-anchor="middle">JSON</text>
+
+          <rect class="box input" x="822" y="214" width="160" height="64" rx="8"/>
+          <text class="t-title" x="902" y="241" text-anchor="middle">GeM portal</text>
+          <text class="t-sub" x="902" y="260" text-anchor="middle">public bid document</text>
+          <line class="edge" x1="820" y1="246" x2="762" y2="246" marker-end="url(#f3-arrow)"/>
+          <text class="t-label" x="791" y="236" text-anchor="middle">PDF</text>
+
+          <text class="t-label" x="902" y="314" text-anchor="middle">the only traffic</text>
+          <text class="t-label" x="902" y="330" text-anchor="middle">leaving the PC</text>
+        </svg>
+      </div>
+      <figcaption>Everything runs on one PC and starts by itself at login: Docker brings the app back, and a Startup shortcut runs the mail watcher. The tools run inside Docker because Windows Smart App Control blocks the Python libraries on the host. Two connections leave the PC: the AI call, which carries the tender documents (so the production setup is paid Claude, not a free tier), and the GeM download, one public document per click.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>What each part guarantees</h2>
+    <div class="rules">
+      <div class="rule"><strong>Nothing is sent by itself</strong><p>Replies to BD are saved in Outlook Drafts. A person checks each one and presses Send.</p></div>
+      <div class="rule"><strong>The right tender, checked</strong><p>A GeM document is only used if the bid number printed inside it matches the tender.</p></div>
+      <div class="rule"><strong>No tender is dropped</strong><p>If the AI misses a row or a batch fails, the tender goes to "AI wasn't sure" for a person to look at.</p></div>
+      <div class="rule"><strong>No prices from the AI</strong><p>The draft has no price field. Price cells in <code>Price_Bid.xlsx</code> stay blank and yellow; totals and GST are formulas.</p></div>
+      <div class="rule"><strong>No claims without proof</strong><p>AS9100, CEMILAC, Udyam or vendor registration is only stated if <code>company_profile.toml</code> records it.</p></div>
+      <div class="rule"><strong>Every gap is visible</strong><p>Anything a person must decide is a yellow gap, and each document opens with its count.</p></div>
+      <div class="rule"><strong>Every fact has a source</strong><p>The AI summary cites the file and page, so a reviewer can check a claim in seconds.</p></div>
+      <div class="rule"><strong>Paid work is never lost</strong><p>The AI's draft is saved before documents are written; "Remake documents" reuses it with no new AI call.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>Still done by people, and what could come next</h2>
+    <ul class="next">
+      <li><span class="stage">Other sites</span><p>RFQs on IOCL, defproc or CPPP need a login there, so BD downloads and uploads them. GeM tenders are fetched automatically.</p></li>
+      <li><span class="stage">Sending</span><p>Each reply to BD is checked and sent by a person from Outlook Drafts. This stays manual on purpose.</p></li>
+      <li><span class="stage">Price &amp; submit</span><p>Prices, signatures and the portal upload are done by people. This stays manual on purpose.</p></li>
+      <li><span class="stage">AI provider</span><p>Testing runs on free Gemini, which is sometimes busy. Next: paid Claude, so tender documents aren't used by the provider and runs don't fail for busy servers.</p></li>
+      <li><span class="stage">Learning</span><p>Outcomes aren't recorded yet. Next: log wins, losses and L1 prices to sharpen the sorting and give BD price history.</p></li>
+    </ul>
+  </section>
+</main>
+
+</body>
+</html>
