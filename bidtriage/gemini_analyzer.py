@@ -18,6 +18,9 @@ from bidtriage.models import Bid
 from bidtriage.schema import BidAssessment
 
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+# When a model stays busy ("high demand" 503, or its free quota is used up) after the retries, try these next.
+FALLBACK_GEMINI_MODELS = ("gemini-3.7-flash", "gemini-3.5-flash")
+BUSY_CODES = {429, 500, 503, 504}
 # Gemini's limit for a request with inline file data is 20 MB.
 MAX_INLINE_BYTES = 19 * 1024 * 1024
 OK_FINISH = {"STOP", "FINISH_REASON_UNSPECIFIED"}
@@ -87,19 +90,30 @@ def call_gemini(system: str, blocks: list[dict], text: str, schema: type[M], *, 
     if size > MAX_INLINE_BYTES:
         raise AnalysisError(f"attachments ({size / 1_048_576:.1f} MB) are too large for one Gemini request "
                             f"(limit {MAX_INLINE_BYTES / 1_048_576:.0f} MB)")
-    request = gemini_request(system, blocks, text, schema, model=model, effort=effort)
     from google import genai
     from google.genai import errors, types
 
+    models = [model] + [m for m in FALLBACK_GEMINI_MODELS if m != model]
     try:
         # The free tier often answers 503 "high demand"; back off and retry rather than fail at once.
         # A timeout so a stuck connection fails (and is retried) instead of hanging the job for hours.
         client = client or genai.Client(http_options=types.HttpOptions(
             timeout=REQUEST_TIMEOUT_MS,
             retry_options=types.HttpRetryOptions(attempts=SDK_ATTEMPTS, initial_delay=10, max_delay=120,
-                                                 http_status_codes=[429, 500, 503, 504])))
-        response = _generate_with_reconnect(client, request)
+                                                 http_status_codes=sorted(BUSY_CODES))))
+        for i, name in enumerate(models):
+            request = gemini_request(system, blocks, text, schema, model=name, effort=effort)
+            try:
+                response = _generate_with_reconnect(client, request)
+                break
+            except errors.APIError as exc:
+                # still busy after the retries: try the next model rather than fail the whole job
+                if exc.code not in BUSY_CODES or i == len(models) - 1:
+                    raise
     except errors.APIError as exc:
+        if exc.code in BUSY_CODES:
+            raise AnalysisError(f"the AI (Gemini) is overloaded right now (error {exc.code}). This is on Google's "
+                                "side and usually passes in a few minutes; please try again.") from exc
         raise AnalysisError(f"Gemini API error {exc.code}: {exc.message}") from exc
     except httpx.HTTPError as exc:
         raise AnalysisError(f"could not reach the Gemini API ({exc}); try again shortly") from exc

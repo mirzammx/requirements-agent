@@ -171,3 +171,57 @@ def test_timeouts_are_left_to_the_sdk_retry(monkeypatch):
     with pytest.raises(AnalysisError):
         call_gemini("SYS", [], "hello", Tiny, client=Slow(), model="m", effort="low")
     assert len(attempts) == 1
+
+def _busy(code=503):
+    from google.genai import errors
+    return errors.APIError(code, {"error": {"code": code, "message": "This model is currently experiencing high demand.",
+                                            "status": "UNAVAILABLE"}})
+
+
+def test_busy_model_falls_back_to_the_next_one():
+    tried = []
+
+    class Busy:
+        def __init__(self):
+            self.models = SimpleNamespace(generate_content=self._gen)
+
+        def _gen(self, **kwargs):
+            tried.append(kwargs["model"])
+            if kwargs["model"] == "gemini-3.6-flash":
+                raise _busy()
+            return response('{"x": "hi"}')
+
+    assert call_gemini("SYS", [], "hello", Tiny, client=Busy(), model="gemini-3.6-flash", effort="low") == Tiny(x="hi")
+    assert tried == ["gemini-3.6-flash", "gemini-3.7-flash"]
+
+
+def test_all_models_busy_gives_a_plain_message():
+    tried = []
+
+    class AllBusy:
+        def __init__(self):
+            self.models = SimpleNamespace(generate_content=self._gen)
+
+        def _gen(self, **kwargs):
+            tried.append(kwargs["model"])
+            raise _busy()
+
+    with pytest.raises(AnalysisError, match="overloaded right now"):
+        call_gemini("SYS", [], "hello", Tiny, client=AllBusy(), model="gemini-3.6-flash", effort="low")
+    assert tried == ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.5-flash"]
+
+
+def test_other_api_errors_do_not_fall_back():
+    tried = []
+
+    class Bad:
+        def __init__(self):
+            self.models = SimpleNamespace(generate_content=self._gen)
+
+        def _gen(self, **kwargs):
+            tried.append(kwargs["model"])
+            raise _busy(400)
+
+    with pytest.raises(AnalysisError, match="Gemini API error 400"):
+        call_gemini("SYS", [], "hello", Tiny, client=Bad(), model="gemini-3.6-flash", effort="low")
+    assert tried == ["gemini-3.6-flash"]
