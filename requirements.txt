@@ -1,5 +1,7 @@
 ﻿anthropic
 google-genai
+# used directly (GeM fetch, Gemini error handling); don't rely on another package pulling it in
+httpx
 pydantic>=2
 extract-msg
 openpyxl

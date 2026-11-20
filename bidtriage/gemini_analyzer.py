@@ -19,7 +19,7 @@ from bidtriage.schema import BidAssessment
 
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 # When a model stays busy ("high demand" 503, or its free quota is used up) after the retries, try these next.
-FALLBACK_GEMINI_MODELS = ("gemini-3.7-flash", "gemini-3.5-flash")
+FALLBACK_GEMINI_MODELS = ("gemini-3.7-flash", "gemini-3.8-flash")
 BUSY_CODES = {429, 500, 503, 504}
 # Gemini's limit for a request with inline file data is 20 MB.
 MAX_INLINE_BYTES = 19 * 1024 * 1024

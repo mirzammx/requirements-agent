@@ -208,7 +208,7 @@ def test_all_models_busy_gives_a_plain_message():
 
     with pytest.raises(AnalysisError, match="overloaded right now"):
         call_gemini("SYS", [], "hello", Tiny, client=AllBusy(), model="gemini-3.6-flash", effort="low")
-    assert tried == ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.5-flash"]
+    assert tried == ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"]
 
 
 def test_other_api_errors_do_not_fall_back():
